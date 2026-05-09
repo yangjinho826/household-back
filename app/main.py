@@ -1,0 +1,42 @@
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
+
+from app.core.config import settings
+from app.core.database import close_db, init_db
+from app.core.exceptions.handlers import register_exception_handlers
+from app.core.logging import setup_logging
+from app.domain.auth.router import router as auth_router
+from app.domain.health.router import router as health_router
+from app.domain.user.router import router as user_router
+
+setup_logging()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """앱 시작/종료 시 실행되는 라이프사이클 관리"""
+    await init_db()
+    yield
+    await close_db()
+
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    debug=settings.DEBUG,
+    lifespan=lifespan,
+    root_path="/api",
+)
+register_exception_handlers(app)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.include_router(health_router)
+app.include_router(user_router)
+app.include_router(auth_router)
