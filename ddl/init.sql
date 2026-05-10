@@ -166,7 +166,7 @@ CREATE TABLE portfolio_items (
     symbol          VARCHAR(50),
     quantity        NUMERIC(15, 4) NOT NULL,
     avg_price       NUMERIC(15, 2) NOT NULL,
-    current_value   NUMERIC(15, 2) NOT NULL,
+    current_price   NUMERIC(15, 2) NOT NULL,
     is_archived     BOOLEAN NOT NULL,
     data_stat_cd    VARCHAR(30) NOT NULL,
     frst_reg_dt     TIMESTAMPTZ NOT NULL,
@@ -175,6 +175,31 @@ CREATE TABLE portfolio_items (
 
 CREATE INDEX idx_portfolio_household ON portfolio_items(household_id);
 CREATE INDEX idx_portfolio_account ON portfolio_items(account_id);
+
+
+-- =============================================================================
+-- 8-1. portfolio_transactions — 자산 거래 이력 (매수/매도)
+-- =============================================================================
+CREATE TABLE portfolio_transactions (
+    id                UUID PRIMARY KEY,
+    household_id      UUID NOT NULL,    -- logical FK -> households.id
+    account_id        UUID NOT NULL,    -- logical FK -> accounts.id (broker)
+    portfolio_item_id UUID,             -- logical FK -> portfolio_items.id (nullable)
+    ticker            VARCHAR(100) NOT NULL,
+    symbol            VARCHAR(50),
+    pt_type           VARCHAR(10) NOT NULL,    -- BUY / SELL
+    quantity          NUMERIC(15, 4) NOT NULL,
+    price             NUMERIC(15, 2) NOT NULL, -- 단가 (per unit)
+    tx_date           DATE NOT NULL,
+    memo              TEXT,
+    data_stat_cd      VARCHAR(30) NOT NULL,
+    frst_reg_dt       TIMESTAMPTZ NOT NULL,
+    last_mdfcn_dt     TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_pt_household_date ON portfolio_transactions(household_id, tx_date DESC);
+CREATE INDEX idx_pt_account ON portfolio_transactions(account_id);
+CREATE INDEX idx_pt_item ON portfolio_transactions(portfolio_item_id);
 
 
 -- =============================================================================

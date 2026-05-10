@@ -1,0 +1,257 @@
+import logging
+from datetime import date
+from decimal import Decimal
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.enums.data_status import DataStatus
+from app.core.exceptions import CustomException, ErrorCode
+from app.domain.account.enum import AccountType
+from app.domain.account.repository import AccountRepository
+from app.domain.household.model import Household
+from app.domain.portfolio.enum import PortfolioTxType
+from app.domain.portfolio.model import PortfolioItem, PortfolioTransaction
+from app.domain.portfolio.repository import (
+    PortfolioItemRepository,
+    PortfolioTransactionRepository,
+)
+from app.domain.portfolio.schema import (
+    PortfolioCreateRequest,
+    PortfolioResponse,
+    PortfolioSellRequest,
+    PortfolioTxResponse,
+    PortfolioUpdateRequest,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse:
+    account = account_map.get(item.account_id)
+    cost = item.quantity * item.avg_price
+    valuation = item.quantity * item.current_price
+    profit_loss = valuation - cost
+    profit_loss_rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0")
+
+    return PortfolioResponse(
+        id=item.id,
+        account_id=item.account_id,
+        account_name=account.name if account else "(삭제됨)",
+        ticker=item.ticker,
+        symbol=item.symbol,
+        quantity=item.quantity,
+        avg_price=item.avg_price,
+        current_price=item.current_price,
+        cost=cost,
+        valuation=valuation,
+        profit_loss=profit_loss,
+        profit_loss_rate=profit_loss_rate,
+        is_archived=item.is_archived,
+    )
+
+
+def _build_tx_response(tx: PortfolioTransaction, account_map: dict) -> PortfolioTxResponse:
+    account = account_map.get(tx.account_id)
+    return PortfolioTxResponse(
+        id=tx.id,
+        account_id=tx.account_id,
+        account_name=account.name if account else "(삭제됨)",
+        ticker=tx.ticker,
+        symbol=tx.symbol,
+        pt_type=tx.pt_type,
+        quantity=tx.quantity,
+        price=tx.price,
+        total=tx.quantity * tx.price,
+        tx_date=tx.tx_date,
+        memo=tx.memo,
+    )
+
+
+async def _validate_investment_account(
+    db: AsyncSession, household_id: UUID, account_id: UUID,
+):
+    """INVESTMENT 통장이고 같은 가계부 소속인지 검증"""
+    accounts = await AccountRepository(db).find_by_ids([account_id])
+    if not accounts:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    a = accounts[0]
+    if a.household_id != household_id or a.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    if a.account_type != AccountType.INVESTMENT:
+        raise CustomException(ErrorCode.BAD_REQUEST)
+    return a
+
+
+async def list_portfolio(
+    db: AsyncSession, household: Household, account_id: UUID | None = None,
+) -> list[PortfolioResponse]:
+    """보유 종목 목록 (옵션: account_id 필터)"""
+    repo = PortfolioItemRepository(db)
+    if account_id:
+        items = await repo.find_active_by_account_id(account_id)
+        items = [i for i in items if i.household_id == household.id]
+    else:
+        items = await repo.find_active_by_household_id(household.id)
+
+    account_ids = list({i.account_id for i in items})
+    accounts = await AccountRepository(db).find_by_ids(account_ids)
+    account_map = {a.id: a for a in accounts}
+
+    return [_build_response(i, account_map) for i in items]
+
+
+async def buy(
+    db: AsyncSession, household: Household, req: PortfolioCreateRequest,
+) -> PortfolioResponse:
+    """매수 — 같은 종목 누적 또는 새 row + portfolio_transactions 이력 기록"""
+    await _validate_investment_account(db, household.id, req.account_id)
+
+    item_repo = PortfolioItemRepository(db)
+    pt_repo = PortfolioTransactionRepository(db)
+
+    ticker = req.ticker.strip()
+
+    # 매수 이력 기록
+    pt_tx = PortfolioTransaction(
+        household_id=household.id,
+        account_id=req.account_id,
+        portfolio_item_id=None,
+        ticker=ticker,
+        symbol=req.symbol,
+        pt_type=PortfolioTxType.BUY,
+        quantity=req.quantity,
+        price=req.price,
+        tx_date=req.tx_date or date.today(),
+        memo=req.memo,
+        data_stat_cd=DataStatus.ACTIVE,
+    )
+
+    # 같은 종목 있으면 누적, 없으면 새 row
+    existing = await item_repo.find_active_by_account_and_ticker(req.account_id, ticker)
+    if existing:
+        # 누적 평균단가 재계산
+        old_qty = existing.quantity
+        old_avg = existing.avg_price
+        new_qty = old_qty + req.quantity
+        existing.avg_price = (old_qty * old_avg + req.quantity * req.price) / new_qty
+        existing.quantity = new_qty
+        if req.symbol and not existing.symbol:
+            existing.symbol = req.symbol
+        item = existing
+    else:
+        item = PortfolioItem(
+            household_id=household.id,
+            account_id=req.account_id,
+            ticker=ticker,
+            symbol=req.symbol,
+            quantity=req.quantity,
+            avg_price=req.price,
+            current_price=req.price,
+            is_archived=False,
+            data_stat_cd=DataStatus.ACTIVE,
+        )
+        await item_repo.save(item)
+
+    pt_tx.portfolio_item_id = item.id
+    await pt_repo.save(pt_tx)
+    await db.flush()
+
+    logger.info(
+        "매수 (account_id=%s, ticker=%s, qty=%s, price=%s)",
+        req.account_id, ticker, req.quantity, req.price,
+    )
+
+    accounts = await AccountRepository(db).find_by_ids([item.account_id])
+    return _build_response(item, {a.id: a for a in accounts})
+
+
+async def update_portfolio(
+    db: AsyncSession, household: Household, item_id: UUID, req: PortfolioUpdateRequest,
+) -> PortfolioResponse:
+    """평가액/메타 수정 (transaction 무관)"""
+    repo = PortfolioItemRepository(db)
+    item = await repo.find_by_id(item_id)
+    if not item or item.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    if req.current_price is not None:
+        item.current_price = req.current_price
+    if req.ticker is not None:
+        item.ticker = req.ticker.strip()
+    if req.symbol is not None:
+        item.symbol = req.symbol
+    if req.is_archived is not None:
+        item.is_archived = req.is_archived
+
+    await db.flush()
+
+    accounts = await AccountRepository(db).find_by_ids([item.account_id])
+    return _build_response(item, {a.id: a for a in accounts})
+
+
+async def sell(
+    db: AsyncSession, household: Household, item_id: UUID, req: PortfolioSellRequest,
+) -> PortfolioResponse | None:
+    """매도 (부분/전량). 전량 시 portfolio_items soft delete, 응답 None"""
+    item_repo = PortfolioItemRepository(db)
+    pt_repo = PortfolioTransactionRepository(db)
+
+    item = await item_repo.find_by_id(item_id)
+    if not item or item.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    if req.quantity > item.quantity:
+        raise CustomException(ErrorCode.BAD_REQUEST)
+
+    # 매도 이력 기록
+    pt_tx = PortfolioTransaction(
+        household_id=household.id,
+        account_id=item.account_id,
+        portfolio_item_id=item.id,
+        ticker=item.ticker,
+        symbol=item.symbol,
+        pt_type=PortfolioTxType.SELL,
+        quantity=req.quantity,
+        price=req.sell_price,
+        tx_date=req.tx_date or date.today(),
+        memo=req.memo,
+        data_stat_cd=DataStatus.ACTIVE,
+    )
+    await pt_repo.save(pt_tx)
+
+    # 보유량 차감
+    remaining = item.quantity - req.quantity
+    if remaining == 0:
+        item.data_stat_cd = DataStatus.DELETED
+        await db.flush()
+        logger.info("전량 매도 (item_id=%s, qty=%s)", item.id, req.quantity)
+        return None
+
+    item.quantity = remaining
+    await db.flush()
+    logger.info(
+        "부분 매도 (item_id=%s, sold=%s, remaining=%s)",
+        item.id, req.quantity, remaining,
+    )
+
+    accounts = await AccountRepository(db).find_by_ids([item.account_id])
+    return _build_response(item, {a.id: a for a in accounts})
+
+
+async def list_portfolio_transactions(
+    db: AsyncSession, household: Household, account_id: UUID | None = None,
+) -> list[PortfolioTxResponse]:
+    """매수/매도 이력 조회"""
+    repo = PortfolioTransactionRepository(db)
+    if account_id:
+        rows = await repo.find_active_by_account_id(account_id)
+        rows = [r for r in rows if r.household_id == household.id]
+    else:
+        rows = await repo.find_active_by_household_id(household.id)
+
+    account_ids = list({r.account_id for r in rows})
+    accounts = await AccountRepository(db).find_by_ids(account_ids)
+    account_map = {a.id: a for a in accounts}
+
+    return [_build_tx_response(r, account_map) for r in rows]

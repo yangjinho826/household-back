@@ -1,0 +1,145 @@
+import logging
+from datetime import date, datetime
+from decimal import Decimal
+from zoneinfo import ZoneInfo
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.enums.data_status import DataStatus
+from app.core.exceptions import CustomException, ErrorCode
+from app.domain.account.model import Account
+from app.domain.account.repository import AccountRepository
+from app.domain.account.service import _calc_balance
+from app.domain.account_snapshot.model import AccountSnapshot
+from app.domain.account_snapshot.repository import AccountSnapshotRepository
+from app.domain.account_snapshot.schema import (
+    SnapshotMonth,
+    SnapshotMonthBalance,
+    SnapshotYearlyResponse,
+)
+from app.domain.household.model import Household
+from app.domain.transaction.repository import TransactionRepository
+
+logger = logging.getLogger(__name__)
+
+KST = ZoneInfo("Asia/Seoul")
+
+
+def _today_kst() -> date:
+    """한국 시각 기준 오늘 — 운영 서버 UTC 여도 KST 자정 경계 보장"""
+    return datetime.now(KST).date()
+
+
+def _normalize_to_month_first(d: date) -> date:
+    return d.replace(day=1)
+
+
+def _shift_months(d: date, delta_months: int) -> date:
+    """delta_months 만큼 이동한 그 달 1일"""
+    total = d.year * 12 + (d.month - 1) + delta_months
+    y, m = divmod(total, 12)
+    return date(y, m + 1, 1)
+
+
+def _build_month(
+    snapshot_date: date,
+    snapshots: list[AccountSnapshot],
+    account_map: dict,
+) -> SnapshotMonth:
+    items = []
+    total = Decimal("0")
+    for s in snapshots:
+        a = account_map.get(s.account_id)
+        items.append(
+            SnapshotMonthBalance(
+                account_id=s.account_id,
+                account_name=a.name if a else "(삭제됨)",
+                balance=s.balance,
+            )
+        )
+        total += s.balance
+    return SnapshotMonth(
+        snapshot_date=snapshot_date,
+        total_balance=total,
+        accounts=items,
+    )
+
+
+async def create_current_month_snapshot(
+    db: AsyncSession, household: Household,
+) -> SnapshotMonth:
+    repo = AccountSnapshotRepository(db)
+    target_date = _normalize_to_month_first(_today_kst())
+
+    if await repo.has_active_for_month(household.id, target_date):
+        raise CustomException(ErrorCode.SNAPSHOT_ALREADY_EXISTS)
+
+    accounts = [
+        a for a in await AccountRepository(db).find_active_by_household_id(household.id)
+        if not a.is_archived
+    ]
+
+    tx_repo = TransactionRepository(db)
+    snapshots: list[AccountSnapshot] = []
+    for a in accounts:
+        summary = await _calc_balance(tx_repo, a, db)
+        snapshots.append(
+            AccountSnapshot(
+                account_id=a.id,
+                snapshot_date=target_date,
+                balance=summary.balance,
+                data_stat_cd=DataStatus.ACTIVE,
+            )
+        )
+
+    await repo.save_all(snapshots)
+    logger.info(
+        "자산 스냅샷 저장 (household_id=%s, date=%s, accounts=%d)",
+        household.id, target_date, len(snapshots),
+    )
+
+    account_map = {a.id: a for a in accounts}
+    return _build_month(target_date, snapshots, account_map)
+
+
+async def get_yearly_snapshots(
+    db: AsyncSession,
+    household: Household,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> SnapshotYearlyResponse:
+    repo = AccountSnapshotRepository(db)
+    today = _today_kst()
+    current_month = _normalize_to_month_first(today)
+
+    if not to_date:
+        to_date = current_month
+    else:
+        to_date = _normalize_to_month_first(to_date)
+    if not from_date:
+        from_date = _shift_months(to_date, -11)
+    else:
+        from_date = _normalize_to_month_first(from_date)
+
+    rows = await repo.find_by_household_and_range(household.id, from_date, to_date)
+
+    account_ids = list({s.account_id for s in rows})
+    accounts: list[Account] = await AccountRepository(db).find_by_ids(account_ids)
+    account_map = {a.id: a for a in accounts}
+
+    months_grouped: dict[date, list[AccountSnapshot]] = {}
+    for s in rows:
+        months_grouped.setdefault(s.snapshot_date, []).append(s)
+
+    months = [
+        _build_month(d, snaps, account_map)
+        for d, snaps in sorted(months_grouped.items(), key=lambda kv: kv[0])
+    ]
+
+    saved = await repo.has_active_for_month(household.id, current_month)
+
+    return SnapshotYearlyResponse(
+        months=months,
+        current_month_saved=saved,
+        current_month_date=current_month,
+    )

@@ -29,6 +29,11 @@ class ErrorCode(Enum):
 
     # 가계부 그룹 (HH)
     HOUSEHOLD_NOT_MEMBER = (403, "HH001", "해당 가계부의 멤버가 아닙니다.")
+    HOUSEHOLD_NOT_FOUND = (400, "HH002", "가계부를 찾을 수 없습니다.")
+    HOUSEHOLD_NOT_OWNER = (403, "HH003", "가계부 소유자만 가능한 작업입니다.")
+
+    # 자산 스냅샷 (SN)
+    SNAPSHOT_ALREADY_EXISTS = (400, "SN001", "이번 달 자산 스냅샷이 이미 저장되었습니다.")
 
     def __init__(self, status: int, code: str, message: str) -> None:
         self.status = status

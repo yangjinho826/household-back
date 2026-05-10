@@ -8,8 +8,15 @@ from app.core.config import settings
 from app.core.database import close_db, init_db
 from app.core.exceptions.handlers import register_exception_handlers
 from app.core.logging import setup_logging
+from app.domain.account.router import router as account_router
+from app.domain.account_snapshot.router import router as account_snapshot_router
 from app.domain.auth.router import router as auth_router
+from app.domain.category.router import router as category_router
+from app.domain.fixed.router import router as fixed_router
 from app.domain.health.router import router as health_router
+from app.domain.household.router import router as household_router
+from app.domain.portfolio.router import router as portfolio_router
+from app.domain.transaction.router import router as transaction_router
 from app.domain.user.router import router as user_router
 
 setup_logging()
@@ -40,3 +47,10 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(user_router)
 app.include_router(auth_router)
+app.include_router(household_router)
+app.include_router(account_router)
+app.include_router(category_router)
+app.include_router(transaction_router)
+app.include_router(fixed_router)
+app.include_router(account_snapshot_router)
+app.include_router(portfolio_router)
