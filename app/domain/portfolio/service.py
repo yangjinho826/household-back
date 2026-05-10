@@ -17,6 +17,7 @@ from app.domain.portfolio.repository import (
     PortfolioTransactionRepository,
 )
 from app.domain.portfolio.schema import (
+    PortfolioBuyRequest,
     PortfolioCreateRequest,
     PortfolioResponse,
     PortfolioSellRequest,
@@ -101,24 +102,51 @@ async def list_portfolio(
     return [_build_response(i, account_map) for i in items]
 
 
-async def buy(
+async def create_portfolio(
     db: AsyncSession, household: Household, req: PortfolioCreateRequest,
 ) -> PortfolioResponse:
-    """매수 — 같은 종목 누적 또는 새 row + portfolio_transactions 이력 기록"""
+    """종목 등록 — 메타만 (qty=0, avg_price=0). 매수는 buy() 로"""
     await _validate_investment_account(db, household.id, req.account_id)
 
+    item = PortfolioItem(
+        household_id=household.id,
+        account_id=req.account_id,
+        ticker=req.ticker.strip(),
+        symbol=req.symbol,
+        quantity=Decimal("0"),
+        avg_price=Decimal("0"),
+        current_price=req.current_price,
+        is_archived=False,
+        data_stat_cd=DataStatus.ACTIVE,
+    )
+    await PortfolioItemRepository(db).save(item)
+    logger.info(
+        "종목 등록 (account_id=%s, ticker=%s, current_price=%s)",
+        req.account_id, item.ticker, req.current_price,
+    )
+
+    accounts = await AccountRepository(db).find_by_ids([item.account_id])
+    return _build_response(item, {a.id: a for a in accounts})
+
+
+async def buy(
+    db: AsyncSession, household: Household, item_id: UUID, req: PortfolioBuyRequest,
+) -> PortfolioResponse:
+    """매수 액션 — qty 누적 + avg_price 재계산 + 이력 기록"""
     item_repo = PortfolioItemRepository(db)
     pt_repo = PortfolioTransactionRepository(db)
 
-    ticker = req.ticker.strip()
+    item = await item_repo.find_by_id(item_id)
+    if not item or item.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
 
-    # 매수 이력 기록
+    # 1. 매수 이력 기록
     pt_tx = PortfolioTransaction(
         household_id=household.id,
-        account_id=req.account_id,
-        portfolio_item_id=None,
-        ticker=ticker,
-        symbol=req.symbol,
+        account_id=item.account_id,
+        portfolio_item_id=item.id,
+        ticker=item.ticker,
+        symbol=item.symbol,
         pt_type=PortfolioTxType.BUY,
         quantity=req.quantity,
         price=req.price,
@@ -126,40 +154,21 @@ async def buy(
         memo=req.memo,
         data_stat_cd=DataStatus.ACTIVE,
     )
-
-    # 같은 종목 있으면 누적, 없으면 새 row
-    existing = await item_repo.find_active_by_account_and_ticker(req.account_id, ticker)
-    if existing:
-        # 누적 평균단가 재계산
-        old_qty = existing.quantity
-        old_avg = existing.avg_price
-        new_qty = old_qty + req.quantity
-        existing.avg_price = (old_qty * old_avg + req.quantity * req.price) / new_qty
-        existing.quantity = new_qty
-        if req.symbol and not existing.symbol:
-            existing.symbol = req.symbol
-        item = existing
-    else:
-        item = PortfolioItem(
-            household_id=household.id,
-            account_id=req.account_id,
-            ticker=ticker,
-            symbol=req.symbol,
-            quantity=req.quantity,
-            avg_price=req.price,
-            current_price=req.price,
-            is_archived=False,
-            data_stat_cd=DataStatus.ACTIVE,
-        )
-        await item_repo.save(item)
-
-    pt_tx.portfolio_item_id = item.id
     await pt_repo.save(pt_tx)
+
+    # 2. 누적 평균단가 재계산
+    if item.quantity == 0:
+        item.avg_price = req.price
+    else:
+        item.avg_price = (
+            item.quantity * item.avg_price + req.quantity * req.price
+        ) / (item.quantity + req.quantity)
+    item.quantity += req.quantity
     await db.flush()
 
     logger.info(
-        "매수 (account_id=%s, ticker=%s, qty=%s, price=%s)",
-        req.account_id, ticker, req.quantity, req.price,
+        "매수 (item_id=%s, qty=%s, price=%s, total_qty=%s, avg=%s)",
+        item.id, req.quantity, req.price, item.quantity, item.avg_price,
     )
 
     accounts = await AccountRepository(db).find_by_ids([item.account_id])

@@ -9,20 +9,32 @@ from app.domain.portfolio.enum import PortfolioTxType
 
 
 class PortfolioCreateRequest(BaseModel):
-    """매수 요청"""
+    """종목 등록 — 메타만 (수량/매수가는 매수 액션에서)"""
 
     ticker: str
     symbol: str | None = None
-    quantity: Decimal
-    price: Decimal
+    current_price: Decimal
     account_id: UUID
-    tx_date: date | None = None
-    memo: str | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> "PortfolioCreateRequest":
         if not (1 <= len(self.ticker.strip()) <= 100):
             raise CustomException(ErrorCode.BAD_REQUEST)
+        if self.current_price <= 0:
+            raise CustomException(ErrorCode.BAD_REQUEST)
+        return self
+
+
+class PortfolioBuyRequest(BaseModel):
+    """매수 액션 — qty 누적 + avg_price 재계산 + 이력 기록"""
+
+    quantity: Decimal
+    price: Decimal
+    tx_date: date | None = None
+    memo: str | None = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "PortfolioBuyRequest":
         if self.quantity <= 0:
             raise CustomException(ErrorCode.BAD_REQUEST)
         if self.price <= 0:

@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.domain.household.deps import CurrentHousehold
 from app.domain.portfolio import service
 from app.domain.portfolio.schema import (
+    PortfolioBuyRequest,
     PortfolioCreateRequest,
     PortfolioResponse,
     PortfolioSellRequest,
@@ -35,8 +36,20 @@ async def create_portfolio(
     household: CurrentHousehold,
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[PortfolioResponse]:
-    """매수 — 같은 종목 누적 + portfolio_transactions 이력 자동 기록"""
-    response = await service.buy(db, household, req)
+    """종목 등록 — 메타만 (qty=0 시작). 매수는 /buy/{id}"""
+    response = await service.create_portfolio(db, household, req)
+    return ApiResponse.ok(data=response)
+
+
+@router.post("/buy/{item_id}")
+async def buy_portfolio(
+    item_id: UUID,
+    req: PortfolioBuyRequest,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PortfolioResponse]:
+    """매수 — qty 누적 + avg_price 재계산 + 이력 기록"""
+    response = await service.buy(db, household, item_id, req)
     return ApiResponse.ok(data=response)
 
 
