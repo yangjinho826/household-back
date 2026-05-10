@@ -59,7 +59,13 @@ async def refresh(
 
 
 @router.post("/logout")
-async def logout(response: Response) -> ApiResponse[None]:
-    """로그아웃 (쿠키 삭제)"""
+async def logout(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    refresh_token: str | None = Cookie(None, alias=_REFRESH_COOKIE_KEY),
+) -> ApiResponse[None]:
+    """로그아웃 (refresh token DB 폐기 + 쿠키 삭제)"""
+    if refresh_token:
+        await service.logout(db, refresh_token)
     _delete_refresh_cookie(response)
     return ApiResponse.ok()

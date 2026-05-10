@@ -107,3 +107,15 @@ async def refresh(db: AsyncSession, refresh_token: str) -> RefreshResponse:
         access_token=access_token,
         expires_in=settings.JWT_EXPIRATION,
     )
+
+
+async def logout(db: AsyncSession, refresh_token: str) -> None:
+    """로그아웃 — DB 의 refresh token 폐기 (idempotent)"""
+    token_repo = RefreshTokenRepository(db)
+    token_entity = await token_repo.find_active_by_token(refresh_token)
+    if token_entity:
+        token_entity.data_stat_cd = DataStatus.DELETED
+        token_entity.revoked_at = datetime.now()
+        logger.info("로그아웃 — refresh token 폐기 (user_id=%s)", token_entity.user_id)
+    else:
+        logger.info("로그아웃 — DB 에 active 토큰 없음 (이미 폐기되었거나 위조)")
