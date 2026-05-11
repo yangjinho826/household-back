@@ -98,10 +98,22 @@ def _build_response(account: Account, summary: BalanceSummary) -> AccountRespons
     )
 
 
-async def list_accounts(db: AsyncSession, household: Household) -> list[AccountResponse]:
+async def list_accounts(
+    db: AsyncSession,
+    household: Household,
+    *,
+    search_term: str | None = None,
+    account_type: str | None = None,
+    is_archived: bool | None = None,
+) -> list[AccountResponse]:
     repo = AccountRepository(db)
     tx_repo = TransactionRepository(db)
-    accounts = await repo.find_active_by_household_id(household.id)
+    accounts = await repo.search_by_household_id(
+        household.id,
+        search_term=search_term,
+        account_type=account_type,
+        is_archived=is_archived,
+    )
     responses = []
     for a in accounts:
         summary = await _calc_balance(tx_repo, a, db)
@@ -183,3 +195,16 @@ async def delete_account(
     account.data_stat_cd = DataStatus.DELETED
     await db.flush()
     logger.info("통장 삭제 (account_id=%s)", account_id)
+
+
+async def get_account_detail(
+    db: AsyncSession, household: Household, account_id: UUID,
+) -> AccountResponse:
+    """통장 단건 조회 — 잔액 + PNL 포함"""
+    repo = AccountRepository(db)
+    account = await repo.find_by_id(account_id)
+    if not account or account.household_id != household.id or account.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    tx_repo = TransactionRepository(db)
+    summary = await _calc_balance(tx_repo, account, db)
+    return _build_response(account, summary)

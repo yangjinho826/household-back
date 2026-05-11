@@ -286,6 +286,18 @@ async def delete_portfolio(
     logger.info("종목 삭제 (item_id=%s)", item_id)
 
 
+async def get_portfolio_detail(
+    db: AsyncSession, household: Household, item_id: UUID,
+) -> PortfolioResponse:
+    """종목 단건 조회 — PNL 포함"""
+    repo = PortfolioItemRepository(db)
+    item = await repo.find_by_id(item_id)
+    if not item or item.household_id != household.id or item.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    accounts = await AccountRepository(db).find_by_ids([item.account_id])
+    return _build_response(item, {a.id: a for a in accounts})
+
+
 def _default_date_range(
     from_date: date | None, to_date: date | None,
 ) -> tuple[date, date]:

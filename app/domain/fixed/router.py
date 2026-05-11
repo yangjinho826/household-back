@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
@@ -19,10 +19,16 @@ router = APIRouter(prefix="/fixed", tags=["fixed"])
 @router.get("/list")
 async def list_fixed_expenses(
     household: CurrentHousehold,
+    search_term: str | None = Query(None, alias="searchTerm"),
+    is_archived: bool | None = Query(None, alias="isArchived"),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[list[FixedResponse]]:
-    """고정지출 참조 목록"""
-    response = await service.list_fixed_expenses(db, household)
+    """고정지출 목록 — searchTerm/isArchived 필터"""
+    response = await service.list_fixed_expenses(
+        db, household,
+        search_term=search_term,
+        is_archived=is_archived,
+    )
     return ApiResponse.ok(data=response)
 
 
@@ -34,6 +40,17 @@ async def create_fixed_expense(
 ) -> ApiResponse[FixedResponse]:
     """고정지출 생성"""
     response = await service.create_fixed_expense(db, household, req)
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/detail/{fixed_id}")
+async def get_fixed_detail(
+    fixed_id: UUID,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[FixedResponse]:
+    """고정지출 단건 조회"""
+    response = await service.get_fixed_detail(db, household, fixed_id)
     return ApiResponse.ok(data=response)
 
 

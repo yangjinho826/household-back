@@ -53,7 +53,21 @@ class HouseholdMemberResponse(BaseModel):
     id: UUID
     household_id: UUID
     user_id: UUID
+    user_name: str | None = None
+    user_email: str | None = None
     role: HouseholdRole
     joined_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class HouseholdMemberCreateRequest(BaseModel):
+    user_id: UUID
+    role: HouseholdRole = HouseholdRole.MEMBER
+
+    @model_validator(mode="after")
+    def _validate(self) -> "HouseholdMemberCreateRequest":
+        if self.role == HouseholdRole.OWNER:
+            # OWNER 추가는 household 생성 시에만 자동으로. API 로 OWNER 추가 X
+            raise CustomException(ErrorCode.BAD_REQUEST)
+        return self

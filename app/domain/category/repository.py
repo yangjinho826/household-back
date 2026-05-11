@@ -35,6 +35,33 @@ class CategoryRepository:
         )
         return list(result.scalars().all())
 
+    async def search_by_household_id(
+        self,
+        household_id: UUID,
+        *,
+        search_term: str | None = None,
+        kind: str | None = None,
+        is_archived: bool | None = None,
+    ) -> list[Category]:
+        """검색/필터 — search_term 은 name LIKE %term%"""
+        conditions = [
+            Category.household_id == household_id,
+            Category.data_stat_cd == DataStatus.ACTIVE,
+        ]
+        if search_term:
+            conditions.append(Category.name.ilike(f"%{search_term.strip()}%"))
+        if kind:
+            conditions.append(Category.kind == kind)
+        if is_archived is not None:
+            conditions.append(Category.is_archived == is_archived)
+
+        result = await self.db.execute(
+            select(Category)
+            .where(and_(*conditions))
+            .order_by(Category.kind.asc(), Category.sort_order.asc(), Category.frst_reg_dt.asc())
+        )
+        return list(result.scalars().all())
+
     async def find_by_ids(self, ids: list[UUID]) -> list[Category]:
         if not ids:
             return []

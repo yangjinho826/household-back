@@ -24,6 +24,19 @@ class UserRepository:
         )
         return result.scalar_one_or_none()
 
+    async def find_by_ids(self, user_ids: list[UUID]) -> list[User]:
+        if not user_ids:
+            return []
+        result = await self.db.execute(
+            select(User).where(
+                and_(
+                    User.id.in_(user_ids),
+                    User.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+        )
+        return list(result.scalars().all())
+
     async def find_by_email(self, email: str) -> User | None:
         result = await self.db.execute(
             select(User).where(

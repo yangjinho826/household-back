@@ -14,10 +14,13 @@ from app.domain.household.repository import (
 )
 from app.domain.household.schema import (
     HouseholdCreateRequest,
+    HouseholdMemberCreateRequest,
+    HouseholdMemberResponse,
     HouseholdResponse,
     HouseholdUpdateRequest,
 )
 from app.domain.user.model import User
+from app.domain.user.repository import UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -118,3 +121,136 @@ async def delete_household(
     household.data_stat_cd = DataStatus.DELETED
     await db.flush()
     logger.info("가계부 삭제 (household_id=%s)", household_id)
+
+
+def _build_member_response(
+    member: HouseholdMember, user: User | None,
+) -> HouseholdMemberResponse:
+    return HouseholdMemberResponse(
+        id=member.id,
+        household_id=member.household_id,
+        user_id=member.user_id,
+        user_name=user.name if user else None,
+        user_email=user.email if user else None,
+        role=HouseholdRole(member.role),
+        joined_at=member.joined_at,
+    )
+
+
+async def _require_membership(
+    db: AsyncSession, household_id: UUID, user_id: UUID,
+) -> HouseholdMember:
+    """현재 user 가 해당 household 멤버인지 검증, 멤버 반환"""
+    member_repo = HouseholdMemberRepository(db)
+    membership = await member_repo.find_by_household_and_user(household_id, user_id)
+    if not membership:
+        raise CustomException(ErrorCode.HOUSEHOLD_NOT_MEMBER)
+    return membership
+
+
+async def _require_owner(
+    db: AsyncSession, household_id: UUID, user_id: UUID,
+) -> Household:
+    """owner 권한 검증, household 반환"""
+    repo = HouseholdRepository(db)
+    household = await repo.find_by_id(household_id)
+    if not household:
+        raise CustomException(ErrorCode.HOUSEHOLD_NOT_FOUND)
+    if household.owner_id != user_id:
+        raise CustomException(ErrorCode.HOUSEHOLD_NOT_OWNER)
+    return household
+
+
+async def list_household_members(
+    db: AsyncSession, household_id: UUID, current_user: User,
+) -> list[HouseholdMemberResponse]:
+    """가계부 멤버 목록 — 본인이 멤버일 때만 조회 가능"""
+    await _require_membership(db, household_id, current_user.id)
+
+    member_repo = HouseholdMemberRepository(db)
+    members = await member_repo.find_active_by_household_id(household_id)
+
+    user_ids = [m.user_id for m in members]
+    users = await UserRepository(db).find_by_ids(user_ids) if user_ids else []
+    user_map = {u.id: u for u in users}
+
+    return [_build_member_response(m, user_map.get(m.user_id)) for m in members]
+
+
+async def add_household_member(
+    db: AsyncSession,
+    household_id: UUID,
+    req: HouseholdMemberCreateRequest,
+    current_user: User,
+) -> HouseholdMemberResponse:
+    """가계부 멤버 추가 (owner 만)"""
+    await _require_owner(db, household_id, current_user.id)
+
+    user_repo = UserRepository(db)
+    target = await user_repo.find_by_id(req.user_id)
+    if not target:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    member_repo = HouseholdMemberRepository(db)
+    existing = await member_repo.find_by_household_and_user(household_id, req.user_id)
+    if existing:
+        raise CustomException(ErrorCode.HOUSEHOLD_MEMBER_ALREADY)
+
+    member = HouseholdMember(
+        household_id=household_id,
+        user_id=req.user_id,
+        role=req.role,
+        joined_at=datetime.now(),
+        data_stat_cd=DataStatus.ACTIVE,
+    )
+    await member_repo.save(member)
+    logger.info(
+        "가계부 멤버 추가 (household_id=%s, user_id=%s, role=%s)",
+        household_id, req.user_id, req.role,
+    )
+    return _build_member_response(member, target)
+
+
+async def remove_household_member(
+    db: AsyncSession,
+    household_id: UUID,
+    member_id: UUID,
+    current_user: User,
+) -> None:
+    """가계부 멤버 제거 (owner 만, owner 본인은 제거 불가)"""
+    household = await _require_owner(db, household_id, current_user.id)
+
+    member_repo = HouseholdMemberRepository(db)
+    member = await member_repo.find_by_id(member_id)
+    if not member or member.household_id != household_id:
+        raise CustomException(ErrorCode.HOUSEHOLD_MEMBER_NOT_FOUND)
+    if member.user_id == household.owner_id:
+        raise CustomException(ErrorCode.HOUSEHOLD_OWNER_CANNOT_LEAVE)
+
+    member.data_stat_cd = DataStatus.DELETED
+    await db.flush()
+    logger.info("가계부 멤버 제거 (member_id=%s)", member_id)
+
+
+async def get_household_detail(
+    db: AsyncSession, household_id: UUID, current_user: User,
+) -> HouseholdResponse:
+    """가계부 단건 조회 — 멤버만 접근 가능"""
+    repo = HouseholdRepository(db)
+    member_repo = HouseholdMemberRepository(db)
+    household = await repo.find_by_id(household_id)
+    if not household or household.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.HOUSEHOLD_NOT_FOUND)
+
+    membership = await member_repo.find_by_household_and_user(
+        household_id, current_user.id,
+    )
+    if not membership:
+        raise CustomException(ErrorCode.HOUSEHOLD_NOT_FOUND)
+
+    role = (
+        HouseholdRole.OWNER
+        if household.owner_id == current_user.id
+        else HouseholdRole(membership.role)
+    )
+    return _build_response(household, role)

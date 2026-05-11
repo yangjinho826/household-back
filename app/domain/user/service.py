@@ -38,6 +38,16 @@ async def detail_user(db: AsyncSession, user_id: UUID) -> UserResponse:
     return UserResponse.model_validate(user)
 
 
+async def search_by_email(db: AsyncSession, email: str) -> UserResponse:
+    """이메일 정확 매칭 검색 — 가계부 멤버 초대용. 미가입 시 NOT_FOUND"""
+    repo = UserRepository(db)
+    normalized = email.strip().lower()
+    user = await repo.find_by_email(normalized)
+    if not user:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    return UserResponse.model_validate(user)
+
+
 async def update_user(
     db: AsyncSession,
     user_id: UUID,

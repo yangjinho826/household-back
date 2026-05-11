@@ -31,9 +31,21 @@ def _build_response(category: Category) -> CategoryResponse:
     )
 
 
-async def list_categories(db: AsyncSession, household: Household) -> list[CategoryResponse]:
+async def list_categories(
+    db: AsyncSession,
+    household: Household,
+    *,
+    search_term: str | None = None,
+    kind: str | None = None,
+    is_archived: bool | None = None,
+) -> list[CategoryResponse]:
     repo = CategoryRepository(db)
-    categories = await repo.find_active_by_household_id(household.id)
+    categories = await repo.search_by_household_id(
+        household.id,
+        search_term=search_term,
+        kind=kind,
+        is_archived=is_archived,
+    )
     return [_build_response(c) for c in categories]
 
 
@@ -101,3 +113,14 @@ async def delete_category(
     category.data_stat_cd = DataStatus.DELETED
     await db.flush()
     logger.info("카테고리 삭제 (category_id=%s)", category_id)
+
+
+async def get_category_detail(
+    db: AsyncSession, household: Household, category_id: UUID,
+) -> CategoryResponse:
+    """카테고리 단건 조회"""
+    repo = CategoryRepository(db)
+    category = await repo.find_by_id(category_id)
+    if not category or category.household_id != household.id or category.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    return _build_response(category)

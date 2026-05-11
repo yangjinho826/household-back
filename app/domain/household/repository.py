@@ -62,6 +62,33 @@ class HouseholdMemberRepository:
         )
         return result.scalar_one_or_none()
 
+    async def find_by_id(self, member_id: UUID) -> HouseholdMember | None:
+        result = await self.db.execute(
+            select(HouseholdMember).where(
+                and_(
+                    HouseholdMember.id == member_id,
+                    HouseholdMember.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def find_active_by_household_id(
+        self, household_id: UUID,
+    ) -> list[HouseholdMember]:
+        stmt = (
+            select(HouseholdMember)
+            .where(
+                and_(
+                    HouseholdMember.household_id == household_id,
+                    HouseholdMember.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .order_by(HouseholdMember.joined_at.asc())
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def save(self, member: HouseholdMember) -> None:
         self.db.add(member)
         await self.db.flush()

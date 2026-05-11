@@ -85,6 +85,17 @@ async def delete_transaction(
     return ApiResponse.ok()
 
 
+@router.get("/detail/{tx_id}")
+async def get_transaction_detail(
+    tx_id: UUID,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[TransactionResponse]:
+    """거래 단건 조회"""
+    response = await service.get_transaction_detail(db, household, tx_id)
+    return ApiResponse.ok(data=response)
+
+
 @router.get("/calendar")
 async def get_calendar(
     household: CurrentHousehold,

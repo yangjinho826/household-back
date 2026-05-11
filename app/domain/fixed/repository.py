@@ -35,6 +35,29 @@ class FixedRepository:
         )
         return list(result.scalars().all())
 
+    async def search_by_household_id(
+        self,
+        household_id: UUID,
+        *,
+        search_term: str | None = None,
+        is_archived: bool | None = None,
+    ) -> list[FixedExpense]:
+        conditions = [
+            FixedExpense.household_id == household_id,
+            FixedExpense.data_stat_cd == DataStatus.ACTIVE,
+        ]
+        if search_term:
+            conditions.append(FixedExpense.name.ilike(f"%{search_term.strip()}%"))
+        if is_archived is not None:
+            conditions.append(FixedExpense.is_archived == is_archived)
+
+        result = await self.db.execute(
+            select(FixedExpense)
+            .where(and_(*conditions))
+            .order_by(FixedExpense.sort_order.asc(), FixedExpense.frst_reg_dt.asc())
+        )
+        return list(result.scalars().all())
+
     async def max_sort_order(self, household_id: UUID) -> int:
         result = await self.db.execute(
             select(func.max(FixedExpense.sort_order)).where(

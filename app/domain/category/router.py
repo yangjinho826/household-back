@@ -1,11 +1,12 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
 from app.core.database import get_db
 from app.domain.category import service
+from app.domain.category.enum import CategoryKind
 from app.domain.category.schema import (
     CategoryCreateRequest,
     CategoryResponse,
@@ -19,10 +20,18 @@ router = APIRouter(prefix="/category", tags=["category"])
 @router.get("/list")
 async def list_categories(
     household: CurrentHousehold,
+    search_term: str | None = Query(None, alias="searchTerm"),
+    kind: CategoryKind | None = Query(None),
+    is_archived: bool | None = Query(None, alias="isArchived"),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[list[CategoryResponse]]:
-    """카테고리 목록"""
-    response = await service.list_categories(db, household)
+    """카테고리 목록 — searchTerm/kind/isArchived 필터"""
+    response = await service.list_categories(
+        db, household,
+        search_term=search_term,
+        kind=kind.value if kind else None,
+        is_archived=is_archived,
+    )
     return ApiResponse.ok(data=response)
 
 
@@ -34,6 +43,17 @@ async def create_category(
 ) -> ApiResponse[CategoryResponse]:
     """카테고리 생성"""
     response = await service.create_category(db, household, req)
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/detail/{category_id}")
+async def get_category_detail(
+    category_id: UUID,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[CategoryResponse]:
+    """카테고리 단건 조회"""
+    response = await service.get_category_detail(db, household, category_id)
     return ApiResponse.ok(data=response)
 
 

@@ -31,6 +31,9 @@ class ErrorCode(Enum):
     HOUSEHOLD_NOT_MEMBER = (403, "HH001", "해당 가계부의 멤버가 아닙니다.")
     HOUSEHOLD_NOT_FOUND = (400, "HH002", "가계부를 찾을 수 없습니다.")
     HOUSEHOLD_NOT_OWNER = (403, "HH003", "가계부 소유자만 가능한 작업입니다.")
+    HOUSEHOLD_MEMBER_ALREADY = (400, "HH004", "이미 가계부 멤버입니다.")
+    HOUSEHOLD_MEMBER_NOT_FOUND = (400, "HH005", "해당 멤버를 찾을 수 없습니다.")
+    HOUSEHOLD_OWNER_CANNOT_LEAVE = (400, "HH006", "소유자는 가계부에서 나갈 수 없습니다.")
 
     # 자산 스냅샷 (SN)
     SNAPSHOT_ALREADY_EXISTS = (400, "SN001", "이번 달 자산 스냅샷이 이미 저장되었습니다.")

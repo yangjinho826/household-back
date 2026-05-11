@@ -211,6 +211,17 @@ async def delete_transaction(
     logger.info("거래 삭제 (tx_id=%s)", tx_id)
 
 
+async def get_transaction_detail(
+    db: AsyncSession, household: Household, tx_id: UUID,
+) -> TransactionResponse:
+    """거래 단건 조회 — account/category 조인 필드 포함"""
+    repo = TransactionRepository(db)
+    tx = await repo.find_by_id(tx_id)
+    if not tx or tx.household_id != household.id or tx.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    return await _single_response(db, tx)
+
+
 async def _single_response(db: AsyncSession, tx: Transaction) -> TransactionResponse:
     """단일 거래 응답 — account/category JOIN"""
     account_ids = [tx.account_id]

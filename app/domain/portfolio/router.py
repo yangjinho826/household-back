@@ -90,6 +90,17 @@ async def list_portfolio_transactions(
     return ApiResponse.ok(data=response)
 
 
+@router.get("/detail/{item_id}")
+async def get_portfolio_detail(
+    item_id: UUID,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PortfolioResponse]:
+    """종목 단건 조회 — PNL 포함"""
+    response = await service.get_portfolio_detail(db, household, item_id)
+    return ApiResponse.ok(data=response)
+
+
 @router.delete("/delete/{item_id}")
 async def delete_portfolio(
     item_id: UUID,

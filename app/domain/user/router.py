@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
@@ -20,6 +20,23 @@ async def create(
     """회원 가입"""
     user = await service.create_user(db, req)
     return ApiResponse.ok(data=UserResponse.model_validate(user))
+
+
+@router.get("/me")
+async def me(current_user: CurrentUser) -> ApiResponse[UserResponse]:
+    """현재 로그인한 사용자 정보 — 페이지 새로고침/SSR hydrate 용"""
+    return ApiResponse.ok(data=UserResponse.model_validate(current_user))
+
+
+@router.get("/search")
+async def search(
+    current_user: CurrentUser,  # noqa: ARG001 — 인증 가드용
+    email: str = Query(..., min_length=3, max_length=255),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[UserResponse]:
+    """이메일 정확 매칭 검색 — 가계부 멤버 초대 시 user_id 조회용. 인증 필요"""
+    response = await service.search_by_email(db, email)
+    return ApiResponse.ok(data=response)
 
 
 @router.get("/{user_id}")

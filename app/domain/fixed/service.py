@@ -50,10 +50,18 @@ async def _validate_category(
 
 
 async def list_fixed_expenses(
-    db: AsyncSession, household: Household,
+    db: AsyncSession,
+    household: Household,
+    *,
+    search_term: str | None = None,
+    is_archived: bool | None = None,
 ) -> list[FixedResponse]:
     repo = FixedRepository(db)
-    rows = await repo.find_active_by_household_id(household.id)
+    rows = await repo.search_by_household_id(
+        household.id,
+        search_term=search_term,
+        is_archived=is_archived,
+    )
 
     category_ids = [r.category_id for r in rows if r.category_id]
     categories = await CategoryRepository(db).find_by_ids(category_ids)
@@ -144,3 +152,19 @@ async def delete_fixed_expense(
     fixed.data_stat_cd = DataStatus.DELETED
     await db.flush()
     logger.info("고정지출 삭제 (fixed_id=%s)", fixed_id)
+
+
+async def get_fixed_detail(
+    db: AsyncSession, household: Household, fixed_id: UUID,
+) -> FixedResponse:
+    """고정지출 단건 조회 — 카테고리 조인 포함"""
+    repo = FixedRepository(db)
+    fixed = await repo.find_by_id(fixed_id)
+    if not fixed or fixed.household_id != household.id or fixed.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    category_map = {}
+    if fixed.category_id:
+        cats = await CategoryRepository(db).find_by_ids([fixed.category_id])
+        category_map = {c.id: c for c in cats}
+    return _build_response(fixed, category_map)
