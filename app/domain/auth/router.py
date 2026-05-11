@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import APIRouter, Cookie, Depends, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
@@ -35,6 +36,18 @@ def _delete_refresh_cookie(response: Response) -> None:
     response.delete_cookie(key=_REFRESH_COOKIE_KEY, path=_REFRESH_COOKIE_PATH)
 
 
+def _refresh_failure_response(error: ErrorCode) -> JSONResponse:
+    """refresh 실패 응답 — 쿠키 삭제 + 에러 JSON. 프론트의 무한 polling 차단"""
+    resp = JSONResponse(
+        status_code=error.status,
+        content=ApiResponse.fail(
+            status=error.status, code=error.code, message=error.message,
+        ).model_dump(),
+    )
+    resp.delete_cookie(key=_REFRESH_COOKIE_KEY, path=_REFRESH_COOKIE_PATH)
+    return resp
+
+
 @router.post("/login")
 async def login(
     req: LoginRequest, response: Response, db: AsyncSession = Depends(get_db),
@@ -49,12 +62,19 @@ async def login(
 async def refresh(
     db: AsyncSession = Depends(get_db),
     refresh_token: str | None = Cookie(None, alias=_REFRESH_COOKIE_KEY),
-) -> ApiResponse[RefreshResponse]:
-    """Refresh Token으로 새 Access Token 발급"""
+):
+    """Refresh Token으로 새 Access Token 발급.
+
+    실패 시 refresh_token 쿠키 삭제 — 클라가 redirect 후 다시 protected 페이지로
+    들어가도 guard 가 cookie 없음을 확인하고 /login 으로 가도록 보장.
+    """
     if not refresh_token:
         logger.warning("리프레시 토큰 쿠키 없이 갱신 요청")
-        raise CustomException(ErrorCode.INVALID_REFRESH_TOKEN)
-    result = await service.refresh(db, refresh_token)
+        return _refresh_failure_response(ErrorCode.INVALID_REFRESH_TOKEN)
+    try:
+        result = await service.refresh(db, refresh_token)
+    except CustomException as e:
+        return _refresh_failure_response(e.error_code)
     return ApiResponse.ok(data=result)
 
 

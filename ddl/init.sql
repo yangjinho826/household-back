@@ -207,16 +207,23 @@ CREATE INDEX idx_pt_item ON portfolio_transactions(portfolio_item_id);
 -- =============================================================================
 CREATE TABLE portfolio_value_history (
     id                  UUID PRIMARY KEY,
+    household_id        UUID NOT NULL,    -- logical FK -> households.id
+    account_id          UUID NOT NULL,    -- logical FK -> accounts.id
     portfolio_item_id   UUID NOT NULL,    -- logical FK -> portfolio_items.id
-    record_date         DATE NOT NULL,
-    value               NUMERIC(15, 2) NOT NULL,
-    quantity            NUMERIC(15, 4),
+    snapshot_date       DATE NOT NULL,
+    quantity            NUMERIC(15, 4) NOT NULL,
+    avg_price           NUMERIC(15, 2) NOT NULL,
+    current_price       NUMERIC(15, 2) NOT NULL,
+    cost                NUMERIC(15, 2) NOT NULL,
+    valuation           NUMERIC(15, 2) NOT NULL,
     data_stat_cd        VARCHAR(30) NOT NULL,
     frst_reg_dt         TIMESTAMPTZ NOT NULL,
     last_mdfcn_dt       TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX idx_pvh_item_date ON portfolio_value_history(portfolio_item_id, record_date DESC);
+CREATE INDEX idx_pvh_household ON portfolio_value_history(household_id);
+CREATE INDEX idx_pvh_account ON portfolio_value_history(account_id);
+CREATE INDEX idx_pvh_item_date ON portfolio_value_history(portfolio_item_id, snapshot_date DESC);
 
 
 -- =============================================================================
