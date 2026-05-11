@@ -1,6 +1,6 @@
-# household-back 구현 필요 API 목록
+# household-back API 목록
 
-household-front (`src/_features/<도메인>/api.ts`) 가 호출하는 모든 엔드포인트를 도메인별로 정리. 이 문서는 **목록**만 — 각 도메인의 모델·스키마·라우터 구현은 도메인 단위 별도 작업으로 진행.
+household-front (`src/_features/<도메인>/api.ts`) 가 호출하는 모든 엔드포인트 + 현재 백엔드 구현 상태. 도메인별 모델·스키마·라우터 구현은 도메인 단위 별도 작업으로 진행.
 
 ---
 
@@ -29,88 +29,125 @@ household-front (`src/_features/<도메인>/api.ts`) 가 호출하는 모든 엔
 
 ---
 
-## API 목록 (총 33개)
+## 미구현 (3개)
 
-### 1. auth (3)
+### household member (3) — 도메인 신설 필요
+- `GET    /api/household/members`
+- `POST   /api/household/{householdId}/members/create`
+- `DELETE /api/household/{householdId}/members/{memberId}`
 
-| Method | Path | 설명 |
-|---|---|---|
-| POST | `/api/auth/login` | 로그인 → `TokenResponse {access_token, token_type, expires_in, user}` + refresh cookie set |
-| POST | `/api/auth/refresh` | refresh cookie → 새 `RefreshResponse {access_token, expires_in}` |
-| POST | `/api/auth/logout` | refresh cookie 삭제 |
+---
+
+## API 목록 (정의 39 / 구현 39)
+
+### 1. auth (3/3 ✅)
+
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| POST | `/api/auth/login` | ✅ | 로그인 → `TokenResponse {access_token, token_type, expires_in, user}` + refresh cookie set |
+| POST | `/api/auth/refresh` | ✅ | refresh cookie → 새 `RefreshResponse {access_token, expires_in}` |
+| POST | `/api/auth/logout` | ✅ | refresh cookie 삭제 |
 
 추가 동작:
 - 로그인 시 사용자당 활성 refresh 토큰 5개 제한 (`MAX_ACTIVE_TOKENS`). 초과 시 가장 오래된 거 자동 폐기 (`data_stat_cd=99` + `revoked_at=now`).
 
-### 2. user (3)
+### 2. user (3/3 ✅)
 
-| Method | Path | 설명 |
-|---|---|---|
-| POST | `/api/user` | 회원가입 (`email`, `name`, `password`, `language` ko/en) |
-| GET | `/api/user/{id}` | 사용자 상세 |
-| PUT | `/api/user/{id}` | 사용자 수정 (본인만 — `current_user.id == user_id` 검증) |
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| POST | `/api/user` | ✅ | 회원가입 (`email`, `name`, `password`, `language` ko/en) |
+| GET | `/api/user/{id}` | ✅ | 사용자 상세 |
+| PUT | `/api/user/{id}` | ✅ | 사용자 수정 (본인만 — `current_user.id == user_id` 검증) |
 
-### 3. household (4)
+### 3. household (4/4 ✅)
 
-| Method | Path | 설명 |
-|---|---|---|
-| GET | `/api/household/list` | 현재 user 가 멤버인 가계부 목록 |
-| POST | `/api/household/create` | 가계부 생성 — owner_id 자동 할당 + `household_members` 에 owner row 자동 생성 |
-| PUT | `/api/household/update/{id}` | 가계부 수정 (owner 만) |
-| DELETE | `/api/household/delete/{id}` | 가계부 삭제 (soft, owner 만) |
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| GET | `/api/household/list` | ✅ | 현재 user 가 멤버인 가계부 목록 |
+| POST | `/api/household/create` | ✅ | 가계부 생성 — owner_id 자동 할당 + `household_members` 에 owner row 자동 생성 |
+| PUT | `/api/household/update/{id}` | ✅ | 가계부 수정 (owner 만) |
+| DELETE | `/api/household/delete/{id}` | ✅ | 가계부 삭제 (soft, owner 만) |
 
-### 4. household member (3)
+### 4. household member (0/3 ❌)
 
-| Method | Path | 설명 |
-|---|---|---|
-| GET | `/api/household/members` | 응답 형태 특이 — `Record<householdId, Member[]>` 객체 |
-| POST | `/api/household/{householdId}/members/create` | 멤버 추가 (owner 만) |
-| DELETE | `/api/household/{householdId}/members/{memberId}` | 멤버 추방 (owner 만) |
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| GET | `/api/household/members` | ❌ | 응답 형태 특이 — `Record<householdId, Member[]>` 객체 |
+| POST | `/api/household/{householdId}/members/create` | ❌ | 멤버 추가 (owner 만) |
+| DELETE | `/api/household/{householdId}/members/{memberId}` | ❌ | 멤버 추방 (owner 만) |
 
-### 5. account (4)
+### 5. account (4/4 ✅)
 
-| Method | Path | 설명 |
-|---|---|---|
-| GET | `/api/account/list` | 응답 `balance` 는 `start_balance + transactions` 합산으로 service 계산 |
-| POST | `/api/account/create` | 통장 생성 |
-| PUT | `/api/account/update/{id}` | 통장 수정 |
-| DELETE | `/api/account/delete/{id}` | 통장 삭제 (soft) |
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| GET | `/api/account/list` | ✅ | 응답 `balance` 는 `start_balance + transactions` 합산으로 service 계산 |
+| POST | `/api/account/create` | ✅ | 통장 생성 |
+| PUT | `/api/account/update/{id}` | ✅ | 통장 수정 |
+| DELETE | `/api/account/delete/{id}` | ✅ | 통장 삭제 (soft) |
 
-### 6. category (4)
+### 6. category (4/4 ✅)
 
-| Method | Path | 설명 |
-|---|---|---|
-| GET | `/api/category/list` | 프론트 `isIncome` ↔ DB `kind` 변환 |
-| POST | `/api/category/create` | 카테고리 생성 |
-| PUT | `/api/category/update/{id}` | 카테고리 수정 |
-| DELETE | `/api/category/delete/{id}` | 카테고리 삭제 (soft) |
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| GET | `/api/category/list` | ✅ | 프론트 `isIncome` ↔ DB `kind` 변환 |
+| POST | `/api/category/create` | ✅ | 카테고리 생성 |
+| PUT | `/api/category/update/{id}` | ✅ | 카테고리 수정 |
+| DELETE | `/api/category/delete/{id}` | ✅ | 카테고리 삭제 (soft) |
 
-### 7. transaction (4)
+### 7. transaction (5/4 ✅ — calendar 보너스)
 
-| Method | Path | 설명 |
-|---|---|---|
-| GET | `/api/transaction/list` | 거래 목록 |
-| POST | `/api/transaction/create` | type: `income` / `expense` / `transfer` (transfer 는 `toAccountId` 필수) |
-| PUT | `/api/transaction/update/{id}` | 거래 수정 |
-| DELETE | `/api/transaction/delete/{id}` | 거래 삭제 (soft) |
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| GET | `/api/transaction/list` | ✅ | 거래 목록 |
+| POST | `/api/transaction/create` | ✅ | type: `income` / `expense` / `transfer` (transfer 는 `toAccountId` 필수) |
+| PUT | `/api/transaction/update/{id}` | ✅ | 거래 수정 |
+| DELETE | `/api/transaction/delete/{id}` | ✅ | 거래 삭제 (soft) |
+| GET | `/api/transaction/calendar` | ✅ | 달력 뷰 — `year`/`month` query, 일별 income/expense/transfer 합계 + 월간 합계 |
 
-### 8. fixed (4)
+### 8. fixed (4/4 ✅)
 
-| Method | Path | 설명 |
-|---|---|---|
-| GET | `/api/fixed/list` | 고정지출 참조 목록 |
-| POST | `/api/fixed/create` | 고정지출 추가 |
-| PUT | `/api/fixed/update/{id}` | 고정지출 수정 |
-| DELETE | `/api/fixed/delete/{id}` | 고정지출 삭제 (soft) |
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| GET | `/api/fixed/list` | ✅ | 고정지출 참조 목록 |
+| POST | `/api/fixed/create` | ✅ | 고정지출 추가 |
+| PUT | `/api/fixed/update/{id}` | ✅ | 고정지출 수정 |
+| DELETE | `/api/fixed/delete/{id}` | ✅ | 고정지출 삭제 (soft) |
 
-### 9. portfolio (4)
+### 9. portfolio (7/7 ✅)
 
-| Method | Path | 설명 |
-|---|---|---|
-| GET | `/api/portfolio/list` | broker 는 `account.name` JOIN 후 응답에 포함 |
-| POST | `/api/portfolio/create` | broker 이름 → `account_id` 매핑 |
-| PUT | `/api/portfolio/update/{id}` | 종목 수정 |
-| DELETE | `/api/portfolio/delete/{id}` | 종목 삭제 (soft) |
+종목 등록(`create`)과 매수(`buy`) 액션 분리됨 (d82dbd9). 평가액 수정과 매매 액션 구분.
+
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| GET | `/api/portfolio/list` | ✅ | `accountId` 필터 옵션, PNL 포함. broker 는 `account.name` JOIN |
+| POST | `/api/portfolio/create` | ✅ | 종목 메타 등록 (qty=0 시작). 매수는 별도 액션 |
+| POST | `/api/portfolio/buy/{id}` | ✅ | 매수 — qty 누적 + avg_price 재계산 + 이력 기록 |
+| POST | `/api/portfolio/sell/{id}` | ✅ | 매도 (부분/전량). 전량 시 응답 `data=null` |
+| PUT | `/api/portfolio/update/{id}` | ✅ | 평가액/메타 수정 (transaction 무관) |
+| GET | `/api/portfolio/transactions` | ✅ | 매수/매도 이력. `accountId` 필터 옵션 |
+| DELETE | `/api/portfolio/delete/{id}` | ✅ | 종목 삭제 (soft). value-history 는 보존 |
+
+### 10. account-snapshot (2/2 ✅) — 신규 도메인
+
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| POST | `/api/account-snapshot/create` | ✅ | 이번 달 자산 스냅샷 (모든 active 통장 일괄). **추가로 INVESTMENT 통장의 보유 종목들도 자동 박제** (`portfolio_value_history`) |
+| GET | `/api/account-snapshot/yearly` | ✅ | 월별 자산 추이. `from`/`to` query 옵션, 기본 최근 12개월 |
+
+### 11. portfolio-value-history (2/2 ✅) — 신규 도메인 (조회 spec)
+
+박제는 `POST /api/account-snapshot/create` 가 자동 처리 (통장 + 종목 동시). 별도 박제 API 없음. 이 섹션은 **조회만** 다룸. 응답 그루핑: **종목별** (라인 차트 1개 = 종목 1개). 빈 달은 응답에서 skip — 프론트가 차트 보간 처리.
+
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| GET | `/api/portfolio/value-history` | ✅ | 통장 단위 종목별 월별 추이. `accountId` 필수, `from`/`to` 옵션 (기본 12개월). 응답: `list[{portfolio_item_id, account_id, ticker, symbol, history: [{snapshot_date, quantity, avg_price, current_price, cost, valuation}]}]` |
+| GET | `/api/portfolio/{itemId}/value-history` | ✅ | 특정 종목 월별 추이. `from`/`to` 옵션. 응답: 단건 `{portfolio_item_id, account_id, ticker, symbol, history: [...]}` (삭제된 종목도 조회 가능) |
+
+### 12. stats (1/1 ✅) — 신규 도메인 (대시보드/차트)
+
+| Method | Path | 상태 | 설명 |
+|---|---|---|---|
+| GET | `/api/stats/monthly` | ✅ | 월간 카테고리별 지출/수입 집계. `year`/`month` 필수. 응답: `{year, month, monthly_income, monthly_expense, monthly_transfer, by_category: [{category_id, name, icon, color, is_income, amount, ratio}]}`. ratio 는 같은 kind(수입/지출) 내 max 대비 0~1 비율 — 진행바 길이용. amount desc 정렬, 0건 카테고리 skip |
 
 ---
 
@@ -119,11 +156,15 @@ household-front (`src/_features/<도메인>/api.ts`) 가 호출하는 모든 엔
 의존성 고려한 순서. 사용자 지시 우선 — 강요 X.
 
 1. ~~**auth + users**~~ — 모든 도메인의 전제 ✅ 완료
-2. **household + member** — 대부분 도메인이 `household_id` 로 스코프 (Step 12 의존성)
-3. **account / category** — transaction 의존성
-4. **transaction** — 핵심 비즈니스
-5. **fixed**
-6. **portfolio** (+ `portfolio_value_history`, `account_snapshots`)
+2. ~~**household**~~ — 대부분 도메인이 `household_id` 로 스코프 ✅ 완료
+3. **household member** ❌ — 미구현 (3개)
+4. ~~**account / category**~~ — transaction 의존성 ✅ 완료
+5. ~~**transaction**~~ — 핵심 비즈니스 (+ calendar) ✅ 완료
+6. ~~**fixed**~~ ✅ 완료
+7. ~~**portfolio**~~ — 매매/이력 + delete ✅ 완료
+8. ~~**account-snapshot**~~ — 월별 자산 추이 ✅ 완료 (종목 박제도 자동 포함)
+9. ~~**portfolio-value-history**~~ — 조회 API 2개 ✅ 완료 (박제는 8번에서 자동)
+10. ~~**stats**~~ — 월간 카테고리별 집계 ✅ 완료 (대시보드 카드 + 차트)
 
 ---
 
@@ -135,7 +176,7 @@ household-front (`src/_features/<도메인>/api.ts`) 가 호출하는 모든 엔
 - `household-front/src/_features/{도메인}/mock.ts`
 - `household-front/next.config.mjs` — `/api/*` rewrite
 
-**백엔드 (이미 구현)**
+**백엔드 (공통 인프라)**
 - `app/main.py` — `root_path="/api"` + 라우터 등록
 - `app/core/api_response.py` — `ApiResponse` 래퍼
 - `app/core/auth/jwt.py` — JWT 토큰 생성·검증 (sub + language 페이로드)
@@ -144,4 +185,4 @@ household-front (`src/_features/<도메인>/api.ts`) 가 호출하는 모든 엔
 - `app/core/model.py` — `BaseEntity` (UUID PK + 감사 필드 + soft delete)
 - `app/core/exceptions/error_code.py` — `ErrorCode` enum (CM/AU/US/HH 코드)
 - `app/core/exceptions/handlers.py` — 4종 핸들러 (CustomException / HTTP / Validation / 전역) 모두 ApiResponse 형식 응답
-- `app/domain/auth/`, `app/domain/user/`, `app/domain/health/` — 1단계 완료
+- `app/domain/household/deps.py` — `CurrentHousehold` 의존성 (household_id 헤더 → 멤버십 검증)
