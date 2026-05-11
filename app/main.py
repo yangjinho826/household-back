@@ -16,6 +16,7 @@ from app.domain.fixed.router import router as fixed_router
 from app.domain.health.router import router as health_router
 from app.domain.household.router import router as household_router
 from app.domain.portfolio.router import router as portfolio_router
+from app.domain.stats.router import router as stats_router
 from app.domain.transaction.router import router as transaction_router
 from app.domain.user.router import router as user_router
 
@@ -54,3 +55,4 @@ app.include_router(transaction_router)
 app.include_router(fixed_router)
 app.include_router(account_snapshot_router)
 app.include_router(portfolio_router)
+app.include_router(stats_router)

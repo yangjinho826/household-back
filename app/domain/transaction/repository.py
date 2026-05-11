@@ -155,6 +155,63 @@ class TransactionRepository:
                     sums["transfer_in"] += total
         return sums
 
+    async def sum_by_category_for_month(
+        self, household_id: UUID, year: int, month: int,
+    ) -> list[tuple[UUID, Decimal]]:
+        """category_id 별 EXPENSE/INCOME 합계 (TRANSFER 는 category_id 없음)"""
+        stmt = (
+            select(
+                Transaction.category_id,
+                func.coalesce(func.sum(Transaction.amount), 0).label("total"),
+            )
+            .where(
+                and_(
+                    Transaction.household_id == household_id,
+                    func.extract("year", Transaction.tx_date) == year,
+                    func.extract("month", Transaction.tx_date) == month,
+                    Transaction.category_id.is_not(None),
+                    Transaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .group_by(Transaction.category_id)
+        )
+        result = await self.db.execute(stmt)
+        return [(row[0], Decimal(row[1])) for row in result.all()]
+
+    async def sum_by_type_for_month(
+        self, household_id: UUID, year: int, month: int,
+    ) -> dict[str, Decimal]:
+        """tx_type 별 월 합계 (income/expense/transfer)"""
+        stmt = (
+            select(
+                Transaction.tx_type,
+                func.coalesce(func.sum(Transaction.amount), 0).label("total"),
+            )
+            .where(
+                and_(
+                    Transaction.household_id == household_id,
+                    func.extract("year", Transaction.tx_date) == year,
+                    func.extract("month", Transaction.tx_date) == month,
+                    Transaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .group_by(Transaction.tx_type)
+        )
+        result = await self.db.execute(stmt)
+        sums = {
+            "income": Decimal("0.00"),
+            "expense": Decimal("0.00"),
+            "transfer": Decimal("0.00"),
+        }
+        for tx_type, total in result.all():
+            if tx_type == TxType.INCOME:
+                sums["income"] = Decimal(total)
+            elif tx_type == TxType.EXPENSE:
+                sums["expense"] = Decimal(total)
+            elif tx_type == TxType.TRANSFER:
+                sums["transfer"] = Decimal(total)
+        return sums
+
     async def save(self, tx: Transaction) -> None:
         self.db.add(tx)
         await self.db.flush()
