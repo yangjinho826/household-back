@@ -235,17 +235,17 @@ async def get_calendar(
     rows = await repo.daily_sums_for_month(household.id, year, month)
 
     by_date: dict[date, dict] = {}
-    monthly_income = Decimal("0")
-    monthly_expense = Decimal("0")
-    monthly_transfer = Decimal("0")
+    monthly_income = Decimal("0.00")
+    monthly_expense = Decimal("0.00")
+    monthly_transfer = Decimal("0.00")
 
     for tx_date, tx_type, total, cnt in rows:
         d = by_date.setdefault(
             tx_date,
             {
-                "income": Decimal("0"),
-                "expense": Decimal("0"),
-                "transfer": Decimal("0"),
+                "income": Decimal("0.00"),
+                "expense": Decimal("0.00"),
+                "transfer": Decimal("0.00"),
                 "count": 0,
             },
         )

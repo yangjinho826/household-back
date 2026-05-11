@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.types import Money
 
 
 def _check_common(name: str | None, amount: Decimal | None, day_of_month: int | None, color: str | None) -> None:
@@ -52,7 +53,7 @@ class FixedResponse(BaseModel):
     id: UUID
     household_id: UUID
     name: str
-    amount: Decimal
+    amount: Money
     day_of_month: int
     category_id: UUID | None
     category_name: str | None

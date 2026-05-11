@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.types import Money, Rate
 from app.domain.account.enum import AccountType
 
 
@@ -47,18 +48,18 @@ class AccountResponse(BaseModel):
     household_id: UUID
     name: str
     account_type: AccountType
-    start_balance: Decimal
-    balance: Decimal
+    start_balance: Money
+    balance: Money
     color: str | None
     icon: str | None
     sort_order: int
     is_archived: bool
 
     # INVESTMENT 통장 전용 (LIVING/SAVINGS 는 None)
-    cash: Decimal | None = None
-    portfolio_cost: Decimal | None = None
-    portfolio_valuation: Decimal | None = None
-    portfolio_profit_loss: Decimal | None = None
-    portfolio_profit_loss_rate: Decimal | None = None
+    cash: Money | None = None
+    portfolio_cost: Money | None = None
+    portfolio_valuation: Money | None = None
+    portfolio_profit_loss: Money | None = None
+    portfolio_profit_loss_rate: Rate | None = None
 
     model_config = {"from_attributes": True}

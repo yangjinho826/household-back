@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.types import Money
 from app.domain.transaction.enum import TxType
 
 
@@ -64,7 +65,7 @@ class TransactionResponse(BaseModel):
     id: UUID
     household_id: UUID
     tx_type: TxType
-    amount: Decimal
+    amount: Money
     tx_date: date
     account_id: UUID
     account_name: str | None
@@ -88,16 +89,16 @@ class TransactionListResponse(BaseModel):
 
 class CalendarDay(BaseModel):
     date: date
-    income: Decimal
-    expense: Decimal
-    transfer: Decimal
+    income: Money
+    expense: Money
+    transfer: Money
     count: int
 
 
 class CalendarResponse(BaseModel):
     year: int
     month: int
-    monthly_income: Decimal
-    monthly_expense: Decimal
-    monthly_transfer: Decimal
+    monthly_income: Money
+    monthly_expense: Money
+    monthly_transfer: Money
     days: list[CalendarDay]

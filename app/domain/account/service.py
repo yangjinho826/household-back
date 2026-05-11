@@ -62,10 +62,10 @@ async def _calc_balance(
     cash += pt_sums["sell"]
 
     items = await pi_repo.find_active_by_account_id(account.id)
-    cost = sum((i.quantity * i.avg_price for i in items), Decimal("0"))
-    valuation = sum((i.quantity * i.current_price for i in items), Decimal("0"))
+    cost = sum((i.quantity * i.avg_price for i in items), Decimal("0.00"))
+    valuation = sum((i.quantity * i.current_price for i in items), Decimal("0.00"))
     profit_loss = valuation - cost
-    profit_loss_rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0")
+    profit_loss_rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0.00")
     balance = cash + valuation
 
     return BalanceSummary(
@@ -131,7 +131,7 @@ async def create_account(
     # 갓 생성: 거래/portfolio 0건이라 balance == start_balance
     summary = BalanceSummary(balance=account.start_balance)
     if account.account_type == AccountType.INVESTMENT:
-        zero = Decimal("0")
+        zero = Decimal("0.00")
         summary = BalanceSummary(
             balance=account.start_balance,
             cash=account.start_balance,
