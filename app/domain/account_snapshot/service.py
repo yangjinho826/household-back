@@ -18,6 +18,7 @@ from app.domain.account_snapshot.schema import (
     SnapshotYearlyResponse,
 )
 from app.domain.household.model import Household
+from app.domain.portfolio.snapshot_service import snapshot_household_portfolio
 from app.domain.transaction.repository import TransactionRepository
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ def _build_month(
     account_map: dict,
 ) -> SnapshotMonth:
     items = []
-    total = Decimal("0")
+    total = Decimal("0.00")
     for s in snapshots:
         a = account_map.get(s.account_id)
         items.append(
@@ -93,6 +94,10 @@ async def create_current_month_snapshot(
         )
 
     await repo.save_all(snapshots)
+
+    # 종목 박제 — portfolio 도메인이 자기 책임
+    await snapshot_household_portfolio(db, household, target_date)
+
     logger.info(
         "자산 스냅샷 저장 (household_id=%s, date=%s, accounts=%d)",
         household.id, target_date, len(snapshots),

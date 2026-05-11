@@ -1,3 +1,4 @@
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -14,6 +15,7 @@ from app.domain.portfolio.schema import (
     PortfolioSellRequest,
     PortfolioTxResponse,
     PortfolioUpdateRequest,
+    PortfolioValueHistoryByItem,
 )
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -85,4 +87,45 @@ async def list_portfolio_transactions(
 ) -> ApiResponse[list[PortfolioTxResponse]]:
     """매수/매도 이력"""
     response = await service.list_portfolio_transactions(db, household, account_id)
+    return ApiResponse.ok(data=response)
+
+
+@router.delete("/delete/{item_id}")
+async def delete_portfolio(
+    item_id: UUID,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[None]:
+    """종목 soft delete (data_stat_cd='99'). value-history 는 보존"""
+    await service.delete_portfolio(db, household, item_id)
+    return ApiResponse.ok()
+
+
+@router.get("/value-history")
+async def get_portfolio_value_history_by_account(
+    household: CurrentHousehold,
+    account_id: UUID = Query(..., alias="accountId"),
+    from_date: date | None = Query(None, alias="from"),
+    to_date: date | None = Query(None, alias="to"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[list[PortfolioValueHistoryByItem]]:
+    """통장 단위 종목별 월별 평가액 추이 (차트용). 기본: 최근 12개월"""
+    response = await service.get_value_history_by_account(
+        db, household, account_id, from_date, to_date,
+    )
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/{item_id}/value-history")
+async def get_portfolio_value_history_by_item(
+    item_id: UUID,
+    household: CurrentHousehold,
+    from_date: date | None = Query(None, alias="from"),
+    to_date: date | None = Query(None, alias="to"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PortfolioValueHistoryByItem]:
+    """특정 종목 월별 평가액 추이 (차트용)"""
+    response = await service.get_value_history_by_item(
+        db, household, item_id, from_date, to_date,
+    )
     return ApiResponse.ok(data=response)

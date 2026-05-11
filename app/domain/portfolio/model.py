@@ -38,3 +38,19 @@ class PortfolioTransaction(BaseEntity):
     price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     tx_date: Mapped[date] = mapped_column(Date, nullable=False)
     memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PortfolioValueHistory(BaseEntity):
+    """종목별 월별 평가액 박제 — portfolio_value_history 테이블"""
+
+    __tablename__ = "portfolio_value_history"
+
+    household_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    account_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    portfolio_item_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    avg_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    current_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    cost: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    valuation: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)

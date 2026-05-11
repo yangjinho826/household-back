@@ -1,19 +1,20 @@
 from datetime import date
-from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel
+
+from app.core.types import Money
 
 
 class SnapshotMonthBalance(BaseModel):
     account_id: UUID
     account_name: str
-    balance: Decimal
+    balance: Money
 
 
 class SnapshotMonth(BaseModel):
     snapshot_date: date
-    total_balance: Decimal
+    total_balance: Money
     accounts: list[SnapshotMonthBalance]
 
 

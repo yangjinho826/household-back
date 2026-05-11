@@ -11,10 +11,15 @@ from app.domain.account.enum import AccountType
 from app.domain.account.repository import AccountRepository
 from app.domain.household.model import Household
 from app.domain.portfolio.enum import PortfolioTxType
-from app.domain.portfolio.model import PortfolioItem, PortfolioTransaction
+from app.domain.portfolio.model import (
+    PortfolioItem,
+    PortfolioTransaction,
+    PortfolioValueHistory,
+)
 from app.domain.portfolio.repository import (
     PortfolioItemRepository,
     PortfolioTransactionRepository,
+    PortfolioValueHistoryRepository,
 )
 from app.domain.portfolio.schema import (
     PortfolioBuyRequest,
@@ -23,6 +28,8 @@ from app.domain.portfolio.schema import (
     PortfolioSellRequest,
     PortfolioTxResponse,
     PortfolioUpdateRequest,
+    PortfolioValueHistoryByItem,
+    PortfolioValueHistoryPoint,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,7 +40,7 @@ def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse
     cost = item.quantity * item.avg_price
     valuation = item.quantity * item.current_price
     profit_loss = valuation - cost
-    profit_loss_rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0")
+    profit_loss_rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0.00")
 
     return PortfolioResponse(
         id=item.id,
@@ -113,8 +120,8 @@ async def create_portfolio(
         account_id=req.account_id,
         ticker=req.ticker.strip(),
         symbol=req.symbol,
-        quantity=Decimal("0"),
-        avg_price=Decimal("0"),
+        quantity=Decimal("0.0000"),
+        avg_price=Decimal("0.00"),
         current_price=req.current_price,
         is_archived=False,
         data_stat_cd=DataStatus.ACTIVE,
@@ -264,3 +271,113 @@ async def list_portfolio_transactions(
     account_map = {a.id: a for a in accounts}
 
     return [_build_tx_response(r, account_map) for r in rows]
+
+
+async def delete_portfolio(
+    db: AsyncSession, household: Household, item_id: UUID,
+) -> None:
+    """종목 soft delete (data_stat_cd='99'). value_history row 는 보존"""
+    repo = PortfolioItemRepository(db)
+    item = await repo.find_by_id(item_id)
+    if not item or item.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    item.data_stat_cd = DataStatus.DELETED
+    await db.flush()
+    logger.info("종목 삭제 (item_id=%s)", item_id)
+
+
+def _default_date_range(
+    from_date: date | None, to_date: date | None,
+) -> tuple[date, date]:
+    """기본: 최근 12개월 — account-snapshot/yearly 와 동일 컨벤션"""
+    today = date.today().replace(day=1)
+    if not to_date:
+        to_date = today
+    else:
+        to_date = to_date.replace(day=1)
+    if not from_date:
+        total = to_date.year * 12 + (to_date.month - 1) - 11
+        y, m = divmod(total, 12)
+        from_date = date(y, m + 1, 1)
+    else:
+        from_date = from_date.replace(day=1)
+    return from_date, to_date
+
+
+def _to_history_point(row: PortfolioValueHistory) -> PortfolioValueHistoryPoint:
+    return PortfolioValueHistoryPoint(
+        snapshot_date=row.snapshot_date,
+        quantity=row.quantity,
+        avg_price=row.avg_price,
+        current_price=row.current_price,
+        cost=row.cost,
+        valuation=row.valuation,
+    )
+
+
+async def get_value_history_by_account(
+    db: AsyncSession,
+    household: Household,
+    account_id: UUID,
+    from_date: date | None,
+    to_date: date | None,
+) -> list[PortfolioValueHistoryByItem]:
+    """통장 단위 — 종목별 그루핑된 월별 평가액 추이"""
+    accounts = await AccountRepository(db).find_by_ids([account_id])
+    if not accounts or accounts[0].household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    from_date, to_date = _default_date_range(from_date, to_date)
+
+    history_repo = PortfolioValueHistoryRepository(db)
+    rows = await history_repo.find_by_account_and_range(account_id, from_date, to_date)
+
+    if not rows:
+        return []
+
+    # 삭제된 종목도 ticker 표시 위해 직접 fetch
+    item_ids = list({r.portfolio_item_id for r in rows})
+    items = await PortfolioItemRepository(db).find_by_ids_including_deleted(item_ids)
+    item_map = {i.id: i for i in items}
+
+    grouped: dict[UUID, list[PortfolioValueHistory]] = {}
+    for r in rows:
+        grouped.setdefault(r.portfolio_item_id, []).append(r)
+
+    return [
+        PortfolioValueHistoryByItem(
+            portfolio_item_id=item_id,
+            account_id=account_id,
+            ticker=item_map[item_id].ticker if item_id in item_map else "(삭제됨)",
+            symbol=item_map[item_id].symbol if item_id in item_map else None,
+            history=[_to_history_point(p) for p in points],
+        )
+        for item_id, points in grouped.items()
+    ]
+
+
+async def get_value_history_by_item(
+    db: AsyncSession,
+    household: Household,
+    item_id: UUID,
+    from_date: date | None,
+    to_date: date | None,
+) -> PortfolioValueHistoryByItem:
+    """특정 종목 — 월별 평가액 추이 (삭제된 종목도 조회 가능)"""
+    items = await PortfolioItemRepository(db).find_by_ids_including_deleted([item_id])
+    if not items or items[0].household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    item = items[0]
+
+    from_date, to_date = _default_date_range(from_date, to_date)
+
+    history_repo = PortfolioValueHistoryRepository(db)
+    rows = await history_repo.find_by_item_and_range(item_id, from_date, to_date)
+
+    return PortfolioValueHistoryByItem(
+        portfolio_item_id=item.id,
+        account_id=item.account_id,
+        ticker=item.ticker,
+        symbol=item.symbol,
+        history=[_to_history_point(r) for r in rows],
+    )

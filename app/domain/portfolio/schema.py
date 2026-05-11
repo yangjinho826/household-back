@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.types import Money, Quantity, Rate
 from app.domain.portfolio.enum import PortfolioTxType
 
 
@@ -84,13 +85,13 @@ class PortfolioResponse(BaseModel):
     account_name: str
     ticker: str
     symbol: str | None
-    quantity: Decimal
-    avg_price: Decimal
-    current_price: Decimal
-    cost: Decimal
-    valuation: Decimal
-    profit_loss: Decimal
-    profit_loss_rate: Decimal
+    quantity: Quantity
+    avg_price: Money
+    current_price: Money
+    cost: Money
+    valuation: Money
+    profit_loss: Money
+    profit_loss_rate: Rate
     is_archived: bool
 
 
@@ -103,8 +104,29 @@ class PortfolioTxResponse(BaseModel):
     ticker: str
     symbol: str | None
     pt_type: PortfolioTxType
-    quantity: Decimal
-    price: Decimal
-    total: Decimal
+    quantity: Quantity
+    price: Money
+    total: Money
     tx_date: date
     memo: str | None
+
+
+class PortfolioValueHistoryPoint(BaseModel):
+    """월별 박제 데이터 1건"""
+
+    snapshot_date: date
+    quantity: Quantity
+    avg_price: Money
+    current_price: Money
+    cost: Money
+    valuation: Money
+
+
+class PortfolioValueHistoryByItem(BaseModel):
+    """종목별 그루핑 — 차트의 라인 1개에 해당"""
+
+    portfolio_item_id: UUID
+    account_id: UUID
+    ticker: str
+    symbol: str | None
+    history: list[PortfolioValueHistoryPoint]

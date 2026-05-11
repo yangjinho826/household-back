@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -6,7 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
 from app.domain.portfolio.enum import PortfolioTxType
-from app.domain.portfolio.model import PortfolioItem, PortfolioTransaction
+from app.domain.portfolio.model import (
+    PortfolioItem,
+    PortfolioTransaction,
+    PortfolioValueHistory,
+)
 
 
 class PortfolioItemRepository:
@@ -64,6 +69,15 @@ class PortfolioItemRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def find_by_ids_including_deleted(self, item_ids: list[UUID]) -> list[PortfolioItem]:
+        """삭제된 종목까지 포함 fetch (value-history 응답에 ticker 표시용)"""
+        if not item_ids:
+            return []
+        result = await self.db.execute(
+            select(PortfolioItem).where(PortfolioItem.id.in_(item_ids))
+        )
+        return list(result.scalars().all())
 
     async def sum_valuation_by_account(self, account_id: UUID) -> Decimal:
         """qty * current_price 합산 (_calc_balance 용)"""
@@ -140,3 +154,64 @@ class PortfolioTransactionRepository:
     async def save(self, tx: PortfolioTransaction) -> None:
         self.db.add(tx)
         await self.db.flush()
+
+
+class PortfolioValueHistoryRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def save_all(self, histories: list[PortfolioValueHistory]) -> None:
+        if not histories:
+            return
+        self.db.add_all(histories)
+        await self.db.flush()
+
+    async def has_active_for_month(self, household_id: UUID, month_date: date) -> bool:
+        """이번 달에 종목 박제됐는지 (account_snapshot 과 동일 패턴)"""
+        result = await self.db.execute(
+            select(func.count(PortfolioValueHistory.id)).where(
+                and_(
+                    PortfolioValueHistory.household_id == household_id,
+                    PortfolioValueHistory.snapshot_date == month_date,
+                    PortfolioValueHistory.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+        )
+        return (result.scalar_one() or 0) > 0
+
+    async def find_by_account_and_range(
+        self, account_id: UUID, from_date: date, to_date: date,
+    ) -> list[PortfolioValueHistory]:
+        result = await self.db.execute(
+            select(PortfolioValueHistory)
+            .where(
+                and_(
+                    PortfolioValueHistory.account_id == account_id,
+                    PortfolioValueHistory.snapshot_date >= from_date,
+                    PortfolioValueHistory.snapshot_date <= to_date,
+                    PortfolioValueHistory.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .order_by(
+                PortfolioValueHistory.portfolio_item_id.asc(),
+                PortfolioValueHistory.snapshot_date.asc(),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def find_by_item_and_range(
+        self, item_id: UUID, from_date: date, to_date: date,
+    ) -> list[PortfolioValueHistory]:
+        result = await self.db.execute(
+            select(PortfolioValueHistory)
+            .where(
+                and_(
+                    PortfolioValueHistory.portfolio_item_id == item_id,
+                    PortfolioValueHistory.snapshot_date >= from_date,
+                    PortfolioValueHistory.snapshot_date <= to_date,
+                    PortfolioValueHistory.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .order_by(PortfolioValueHistory.snapshot_date.asc())
+        )
+        return list(result.scalars().all())
