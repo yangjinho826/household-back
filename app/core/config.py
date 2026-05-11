@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "household"
     DEBUG: bool = False
-    PORT: int = 8000
+    PORT: int = 9000
 
     # DB 접속
     DATABASE_URL: str = ""
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRATION: int = 900
+    JWT_EXPIRATION: int = 604800
     JWT_REFRESH_EXPIRATION: int = 604800
 
 
