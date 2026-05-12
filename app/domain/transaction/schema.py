@@ -17,7 +17,7 @@ class TransactionCreateRequest(BaseModel):
     to_account_id: UUID | None = None
     category_id: UUID | None = None
     paid_by_user_id: UUID | None = None
-    is_fixed: bool = False
+    fixed_expense_id: UUID | None = None
     memo: str | None = None
 
     @model_validator(mode="after")
@@ -31,9 +31,14 @@ class TransactionCreateRequest(BaseModel):
                 raise CustomException(ErrorCode.BAD_REQUEST)
             if self.category_id is not None:
                 raise CustomException(ErrorCode.BAD_REQUEST)
+            if self.fixed_expense_id is not None:
+                raise CustomException(ErrorCode.BAD_REQUEST)
         else:
             if self.to_account_id is not None:
                 raise CustomException(ErrorCode.BAD_REQUEST)
+        # 고정 지출 매핑은 expense 만
+        if self.fixed_expense_id is not None and self.tx_type != TxType.EXPENSE:
+            raise CustomException(ErrorCode.BAD_REQUEST)
         return self
 
 
@@ -45,7 +50,7 @@ class TransactionUpdateRequest(BaseModel):
     to_account_id: UUID | None = None
     category_id: UUID | None = None
     paid_by_user_id: UUID | None = None
-    is_fixed: bool | None = None
+    fixed_expense_id: UUID | None = None
     memo: str | None = None
 
     @model_validator(mode="after")
@@ -76,7 +81,7 @@ class TransactionResponse(BaseModel):
     category_color: str | None
     category_icon: str | None
     paid_by_user_id: UUID | None
-    is_fixed: bool
+    fixed_expense_id: UUID | None
     memo: str | None
 
 

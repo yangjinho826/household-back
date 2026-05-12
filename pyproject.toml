@@ -5,6 +5,7 @@ description = "부부 공유 가계부 백엔드"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "alembic>=1.18.4",
     "asyncpg>=0.31.0",
     "bcrypt<4.1",
     "fastapi>=0.135.2",

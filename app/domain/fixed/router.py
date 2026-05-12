@@ -1,13 +1,17 @@
+from datetime import datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
 from app.core.database import get_db
+from app.core.exceptions import CustomException, ErrorCode
 from app.domain.fixed import service
 from app.domain.fixed.schema import (
     FixedCreateRequest,
+    FixedMonthlySummaryResponse,
     FixedResponse,
     FixedUpdateRequest,
 )
@@ -75,3 +79,26 @@ async def delete_fixed_expense(
     """고정지출 삭제 (soft)"""
     await service.delete_fixed_expense(db, household, fixed_id)
     return ApiResponse.ok()
+
+
+@router.get("/monthly-summary")
+async def get_monthly_summary(
+    household: CurrentHousehold,
+    month: str | None = Query(None, description="YYYY-MM 형식. 생략 시 KST 이번달"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[FixedMonthlySummaryResponse]:
+    """고정지출별 해당 월 누적 사용액"""
+    if month:
+        try:
+            year_str, month_str = month.split("-")
+            year, month_int = int(year_str), int(month_str)
+            if not (1 <= month_int <= 12):
+                raise ValueError
+        except (ValueError, AttributeError) as e:
+            raise CustomException(ErrorCode.BAD_REQUEST) from e
+    else:
+        today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+        year, month_int = today.year, today.month
+
+    response = await service.get_monthly_summary(db, household, year, month_int)
+    return ApiResponse.ok(data=response)

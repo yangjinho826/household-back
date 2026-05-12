@@ -10,10 +10,13 @@ from app.domain.fixed.model import FixedExpense
 from app.domain.fixed.repository import FixedRepository
 from app.domain.fixed.schema import (
     FixedCreateRequest,
+    FixedMonthlySummaryResponse,
+    FixedMonthlyUsage,
     FixedResponse,
     FixedUpdateRequest,
 )
 from app.domain.household.model import Household
+from app.domain.transaction.repository import TransactionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -168,3 +171,17 @@ async def get_fixed_detail(
         cats = await CategoryRepository(db).find_by_ids([fixed.category_id])
         category_map = {c.id: c for c in cats}
     return _build_response(fixed, category_map)
+
+
+async def get_monthly_summary(
+    db: AsyncSession, household: Household, year: int, month: int,
+) -> FixedMonthlySummaryResponse:
+    """고정지출별 해당 월 누적 사용액 (EXPENSE 거래 중 fixed_expense_id 매핑된 것 합산)"""
+    rows = await TransactionRepository(db).sum_by_fixed_for_month(
+        household.id, year, month,
+    )
+    items = [
+        FixedMonthlyUsage(fixed_expense_id=fid, used=total)
+        for fid, total in rows
+    ]
+    return FixedMonthlySummaryResponse(month=f"{year:04d}-{month:02d}", items=items)

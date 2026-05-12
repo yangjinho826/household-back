@@ -13,8 +13,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./ddl:/docker-entrypoint-initdb.d
-    ports:
-      - "127.0.0.1:5432:5432"
+    # 외부 노출 X — app 컨테이너가 도커 네트워크로 접근. 디버깅 시 임시로 ports 추가.
     networks:
       - backend
     deploy:
@@ -38,8 +37,7 @@ services:
     image: "${DOCKER_IMAGE_NAME}:latest"
     build: .
     container_name: "${DOCKER_CONTAINER_NAME}"
-    ports:
-      - "8000:8000"
+    # 외부 노출 X — nginx 가 도커 네트워크(household-net)로 접근
     env_file:
       - .env
     environment:

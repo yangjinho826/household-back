@@ -66,11 +66,15 @@ def _build_month(
     )
 
 
-async def create_current_month_snapshot(
+async def create_target_month_snapshot(
     db: AsyncSession, household: Household,
 ) -> SnapshotMonth:
+    """지난달 마감 박제 — 예: 6/1 ~ 6/말 사이 호출하면 5월을 박제.
+    1월에 호출하면 작년 12월 박제.
+    """
     repo = AccountSnapshotRepository(db)
-    target_date = _normalize_to_month_first(_today_kst())
+    # 지난달 1일 = 이번달 1일 - 1개월. _shift_months 가 연도 넘김 처리.
+    target_date = _shift_months(_normalize_to_month_first(_today_kst()), -1)
 
     if await repo.has_active_for_month(household.id, target_date):
         raise CustomException(ErrorCode.SNAPSHOT_ALREADY_EXISTS)
@@ -115,10 +119,11 @@ async def get_yearly_snapshots(
 ) -> SnapshotYearlyResponse:
     repo = AccountSnapshotRepository(db)
     today = _today_kst()
-    current_month = _normalize_to_month_first(today)
+    # 박제 가능한 월 = 지난달. 이번달 1일에서 -1.
+    target_month = _shift_months(_normalize_to_month_first(today), -1)
 
     if not to_date:
-        to_date = current_month
+        to_date = target_month
     else:
         to_date = _normalize_to_month_first(to_date)
     if not from_date:
@@ -141,10 +146,10 @@ async def get_yearly_snapshots(
         for d, snaps in sorted(months_grouped.items(), key=lambda kv: kv[0])
     ]
 
-    saved = await repo.has_active_for_month(household.id, current_month)
+    saved = await repo.has_active_for_month(household.id, target_month)
 
     return SnapshotYearlyResponse(
         months=months,
-        current_month_saved=saved,
-        current_month_date=current_month,
+        target_month_saved=saved,
+        target_month_date=target_month,
     )

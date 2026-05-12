@@ -63,3 +63,13 @@ class FixedResponse(BaseModel):
     icon: str | None
     sort_order: int
     is_archived: bool
+
+
+class FixedMonthlyUsage(BaseModel):
+    fixed_expense_id: UUID
+    used: Money
+
+
+class FixedMonthlySummaryResponse(BaseModel):
+    month: str  # YYYY-MM
+    items: list[FixedMonthlyUsage]

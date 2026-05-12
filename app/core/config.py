@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRATION: int = 604800
-    JWT_REFRESH_EXPIRATION: int = 604800
+    JWT_EXPIRATION: int = 1800  # access token: 30분
+    JWT_REFRESH_EXPIRATION: int = 604800  # refresh token: 7일
 
 
 settings = Settings()

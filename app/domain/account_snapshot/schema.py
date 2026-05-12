@@ -20,5 +20,5 @@ class SnapshotMonth(BaseModel):
 
 class SnapshotYearlyResponse(BaseModel):
     months: list[SnapshotMonth]
-    current_month_saved: bool
-    current_month_date: date
+    target_month_saved: bool
+    target_month_date: date

@@ -178,6 +178,30 @@ class TransactionRepository:
         result = await self.db.execute(stmt)
         return [(row[0], Decimal(row[1])) for row in result.all()]
 
+    async def sum_by_fixed_for_month(
+        self, household_id: UUID, year: int, month: int,
+    ) -> list[tuple[UUID, Decimal]]:
+        """fixed_expense_id 별 해당 월 EXPENSE 합계 — 고정지출별 누적 사용액"""
+        stmt = (
+            select(
+                Transaction.fixed_expense_id,
+                func.coalesce(func.sum(Transaction.amount), 0).label("total"),
+            )
+            .where(
+                and_(
+                    Transaction.household_id == household_id,
+                    func.extract("year", Transaction.tx_date) == year,
+                    func.extract("month", Transaction.tx_date) == month,
+                    Transaction.fixed_expense_id.is_not(None),
+                    Transaction.tx_type == TxType.EXPENSE,
+                    Transaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .group_by(Transaction.fixed_expense_id)
+        )
+        result = await self.db.execute(stmt)
+        return [(row[0], Decimal(row[1])) for row in result.all()]
+
     async def sum_by_type_for_month(
         self, household_id: UUID, year: int, month: int,
     ) -> dict[str, Decimal]:

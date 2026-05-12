@@ -114,7 +114,7 @@ def _build_response(
         category_color=category.color if category else None,
         category_icon=category.icon if category else None,
         paid_by_user_id=tx.paid_by_user_id,
-        is_fixed=tx.is_fixed,
+        fixed_expense_id=tx.fixed_expense_id,
         memo=tx.memo,
     )
 
@@ -140,7 +140,7 @@ async def create_transaction(
         to_account_id=req.to_account_id,
         category_id=req.category_id,
         paid_by_user_id=req.paid_by_user_id or current_user.id,
-        is_fixed=req.is_fixed,
+        fixed_expense_id=req.fixed_expense_id,
         memo=req.memo,
         data_stat_cd=DataStatus.ACTIVE,
     )
@@ -184,8 +184,8 @@ async def update_transaction(
         tx.category_id = req.category_id
     if req.paid_by_user_id is not None:
         tx.paid_by_user_id = req.paid_by_user_id
-    if req.is_fixed is not None:
-        tx.is_fixed = req.is_fixed
+    if req.fixed_expense_id is not None:
+        tx.fixed_expense_id = req.fixed_expense_id
     if req.memo is not None:
         tx.memo = req.memo
 

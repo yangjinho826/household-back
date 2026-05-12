@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, Numeric, String, Text
+from sqlalchemy import Date, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.model import BaseEntity
@@ -21,5 +21,9 @@ class Transaction(BaseEntity):
     to_account_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     category_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     paid_by_user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
-    is_fixed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # 어떤 FixedExpense 에 매핑된 거래인지 (nullable). 매핑되면 자동으로 "고정 지출" 누적에 잡힘.
+    fixed_expense_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("fixed_expenses.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     memo: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -23,7 +23,7 @@ async def snapshot_household_portfolio(
 ) -> list[PortfolioValueHistory]:
     """가계부의 모든 INVESTMENT 통장 종목들을 그 시점 상태로 박제.
 
-    호출처: account_snapshot/service.py 의 create_current_month_snapshot
+    호출처: account_snapshot/service.py 의 create_target_month_snapshot
     """
     account_repo = AccountRepository(db)
     item_repo = PortfolioItemRepository(db)
