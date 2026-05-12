@@ -54,7 +54,7 @@ jobs:
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
             set -e
-            cd ~/household-back
+            cd ~/household/household-back
             git pull origin main
             docker compose pull app
             docker compose up -d --remove-orphans
