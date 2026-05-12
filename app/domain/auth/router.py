@@ -25,8 +25,8 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
         key=_REFRESH_COOKIE_KEY,
         value=refresh_token,
         httponly=True,
-        secure=not settings.DEBUG,
-        samesite="strict",
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
         path=_REFRESH_COOKIE_PATH,
         max_age=settings.JWT_REFRESH_EXPIRATION,
     )

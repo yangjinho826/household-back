@@ -34,5 +34,8 @@ class Settings(BaseSettings):
     JWT_EXPIRATION: int = 1800  # access token: 30분
     JWT_REFRESH_EXPIRATION: int = 604800  # refresh token: 7일
 
+    # 쿠키 — HTTPS 환경에서만 True. HTTP 운영이면 임시로 False.
+    COOKIE_SECURE: bool = True
+
 
 settings = Settings()
