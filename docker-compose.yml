@@ -48,6 +48,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
     deploy:
       resources:
         limits:
