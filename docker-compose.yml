@@ -35,7 +35,6 @@ services:
   # ── FastAPI ──
   app:
     image: "${DOCKER_IMAGE_NAME}:latest"
-    build: .
     container_name: "${DOCKER_CONTAINER_NAME}"
     # 외부 노출 X — nginx 가 도커 네트워크(household-net)로 접근
     env_file:
