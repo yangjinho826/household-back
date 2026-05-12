@@ -47,6 +47,7 @@ services:
       TZ: Asia/Seoul
     networks:
       - backend
+      - household-net
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,6 +63,8 @@ services:
 
 networks:
   backend:
+  household-net:
+    external: true
 
 volumes:
   pgdata:
