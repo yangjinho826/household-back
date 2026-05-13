@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.model import BaseEntity
@@ -10,6 +10,9 @@ class Category(BaseEntity):
     """카테고리 — categories 테이블"""
 
     __tablename__ = "categories"
+    __table_args__ = (
+        CheckConstraint("kind IN ('EXPENSE', 'INCOME')", name="ck_categories_kind"),
+    )
 
     household_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     kind: Mapped[str] = mapped_column(String(10), nullable=False)
