@@ -22,7 +22,7 @@ def _build_response(category: Category) -> CategoryResponse:
     return CategoryResponse(
         id=category.id,
         household_id=category.household_id,
-        is_income=(category.kind == CategoryKind.INCOME),
+        kind=CategoryKind(category.kind),
         name=category.name,
         color=category.color,
         icon=category.icon,
@@ -85,8 +85,8 @@ async def update_category(
     if not category or category.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
-    if req.is_income is not None:
-        category.kind = CategoryKind.INCOME if req.is_income else CategoryKind.EXPENSE
+    if req.kind is not None:
+        category.kind = req.kind
     if req.name is not None:
         category.name = req.name.strip()
     if req.color is not None:

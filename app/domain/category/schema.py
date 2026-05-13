@@ -7,7 +7,7 @@ from app.domain.category.enum import CategoryKind
 
 
 class CategoryCreateRequest(BaseModel):
-    is_income: bool
+    kind: CategoryKind
     name: str
     color: str | None = None
     icon: str | None = None
@@ -21,13 +21,9 @@ class CategoryCreateRequest(BaseModel):
             raise CustomException(ErrorCode.BAD_REQUEST)
         return self
 
-    @property
-    def kind(self) -> CategoryKind:
-        return CategoryKind.INCOME if self.is_income else CategoryKind.EXPENSE
-
 
 class CategoryUpdateRequest(BaseModel):
-    is_income: bool | None = None
+    kind: CategoryKind | None = None
     name: str | None = None
     color: str | None = None
     icon: str | None = None
@@ -46,7 +42,7 @@ class CategoryUpdateRequest(BaseModel):
 class CategoryResponse(BaseModel):
     id: UUID
     household_id: UUID
-    is_income: bool
+    kind: CategoryKind
     name: str
     color: str | None
     icon: str | None
