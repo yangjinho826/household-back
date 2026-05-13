@@ -7,3 +7,4 @@ class AccountType(StrEnum):
     LIVING = "LIVING"        # 생활
     SAVINGS = "SAVINGS"      # 적립
     INVESTMENT = "INVESTMENT"  # 투자
+    OTHER = "OTHER"          # 기타
