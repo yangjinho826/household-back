@@ -31,7 +31,8 @@ config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Windows cp949 회피 — alembic.ini 의 한글 주석 때문에 기본 인코딩으로 못 읽음
+    fileConfig(config.config_file_name, encoding="utf-8")
 
 target_metadata = Base.metadata
 
