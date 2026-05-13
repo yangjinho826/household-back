@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.model import BaseEntity
@@ -12,6 +12,7 @@ class Category(BaseEntity):
     __tablename__ = "categories"
     __table_args__ = (
         CheckConstraint("kind IN ('EXPENSE', 'INCOME')", name="ck_categories_kind"),
+        Index("idx_categories_household", "household_id", "kind"),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(nullable=False)

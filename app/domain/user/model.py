@@ -1,4 +1,4 @@
-from sqlalchemy import String
+from sqlalchemy import Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.enums.data_status import DataStatus
@@ -9,6 +9,9 @@ class User(BaseEntity):
     """사용자 엔티티"""
 
     __tablename__ = "users"
+    __table_args__ = (
+        Index("idx_users_email", "email"),
+    )
 
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)

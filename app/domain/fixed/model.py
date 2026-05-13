@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import Boolean, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.model import BaseEntity
@@ -14,6 +14,9 @@ class FixedExpense(BaseEntity):
     """
 
     __tablename__ = "fixed_expenses"
+    __table_args__ = (
+        Index("idx_fixed_household", "household_id"),
+    )
 
     household_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)

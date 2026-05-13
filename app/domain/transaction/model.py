@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, Text
+from sqlalchemy import Date, ForeignKey, Index, Numeric, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.model import BaseEntity
@@ -12,6 +12,13 @@ class Transaction(BaseEntity):
     """거래 — transactions 테이블"""
 
     __tablename__ = "transactions"
+    __table_args__ = (
+        Index("idx_tx_household_date", "household_id", text("tx_date DESC")),
+        Index("idx_tx_account", "account_id"),
+        Index("idx_tx_to_account", "to_account_id"),
+        Index("idx_tx_category", "category_id"),
+        Index("idx_tx_date", text("tx_date DESC")),
+    )
 
     household_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     tx_type: Mapped[str] = mapped_column(String(10), nullable=False)
