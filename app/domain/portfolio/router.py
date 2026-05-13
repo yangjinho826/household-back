@@ -14,6 +14,7 @@ from app.domain.portfolio.schema import (
     PortfolioResponse,
     PortfolioSellRequest,
     PortfolioTxResponse,
+    PortfolioTxUpdateRequest,
     PortfolioUpdateRequest,
     PortfolioValueHistoryByItem,
 )
@@ -88,6 +89,29 @@ async def list_portfolio_transactions(
     """매수/매도 이력"""
     response = await service.list_portfolio_transactions(db, household, account_id)
     return ApiResponse.ok(data=response)
+
+
+@router.put("/transactions/{tx_id}")
+async def update_portfolio_transaction(
+    tx_id: UUID,
+    req: PortfolioTxUpdateRequest,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PortfolioTxResponse]:
+    """거래 내역 수정 — 해당 종목 quantity / avg_price 자동 재계산"""
+    response = await service.update_portfolio_transaction(db, household, tx_id, req)
+    return ApiResponse.ok(data=response)
+
+
+@router.delete("/transactions/{tx_id}")
+async def delete_portfolio_transaction(
+    tx_id: UUID,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[None]:
+    """거래 내역 soft delete — 해당 종목 quantity / avg_price 자동 재계산"""
+    await service.delete_portfolio_transaction(db, household, tx_id)
+    return ApiResponse.ok()
 
 
 @router.get("/detail/{item_id}")

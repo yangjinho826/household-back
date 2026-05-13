@@ -77,6 +77,23 @@ class PortfolioSellRequest(BaseModel):
         return self
 
 
+class PortfolioTxUpdateRequest(BaseModel):
+    """거래 내역 수정 — pt_type 은 변경 불가 (매수↔매도 전환은 별도 거래로)"""
+
+    quantity: Decimal | None = None
+    price: Decimal | None = None
+    tx_date: date | None = None
+    memo: str | None = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "PortfolioTxUpdateRequest":
+        if self.quantity is not None and self.quantity <= 0:
+            raise CustomException(ErrorCode.BAD_REQUEST)
+        if self.price is not None and self.price <= 0:
+            raise CustomException(ErrorCode.BAD_REQUEST)
+        return self
+
+
 class PortfolioResponse(BaseModel):
     """보유 종목 응답 (PNL 포함)"""
 

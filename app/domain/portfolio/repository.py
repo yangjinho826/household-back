@@ -100,6 +100,31 @@ class PortfolioTransactionRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
+    async def find_by_id(self, tx_id: UUID) -> PortfolioTransaction | None:
+        result = await self.db.execute(
+            select(PortfolioTransaction).where(
+                and_(
+                    PortfolioTransaction.id == tx_id,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def find_active_by_item_id(self, item_id: UUID) -> list[PortfolioTransaction]:
+        """종목의 모든 활성 거래 — 재계산용"""
+        result = await self.db.execute(
+            select(PortfolioTransaction)
+            .where(
+                and_(
+                    PortfolioTransaction.portfolio_item_id == item_id,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .order_by(PortfolioTransaction.tx_date.asc(), PortfolioTransaction.frst_reg_dt.asc())
+        )
+        return list(result.scalars().all())
+
     async def find_active_by_household_id(self, household_id: UUID) -> list[PortfolioTransaction]:
         result = await self.db.execute(
             select(PortfolioTransaction)

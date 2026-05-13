@@ -27,6 +27,7 @@ from app.domain.portfolio.schema import (
     PortfolioResponse,
     PortfolioSellRequest,
     PortfolioTxResponse,
+    PortfolioTxUpdateRequest,
     PortfolioUpdateRequest,
     PortfolioValueHistoryByItem,
     PortfolioValueHistoryPoint,
@@ -271,6 +272,91 @@ async def list_portfolio_transactions(
     account_map = {a.id: a for a in accounts}
 
     return [_build_tx_response(r, account_map) for r in rows]
+
+
+async def _recalc_item_from_transactions(
+    db: AsyncSession, item: PortfolioItem,
+) -> None:
+    """종목의 활성 거래 합산 → quantity / avg_price 재계산.
+
+    매수 가중평균만 avg_price 에 반영. 매도는 수량만 차감 (avg 영향 X).
+    매도가 매수보다 많으면 BAD_REQUEST.
+    """
+    pt_repo = PortfolioTransactionRepository(db)
+    txs = await pt_repo.find_active_by_item_id(item.id)
+
+    total_buy_qty = Decimal("0")
+    total_buy_cost = Decimal("0")
+    total_sell_qty = Decimal("0")
+    for t in txs:
+        if t.pt_type == PortfolioTxType.BUY:
+            total_buy_qty += t.quantity
+            total_buy_cost += t.quantity * t.price
+        elif t.pt_type == PortfolioTxType.SELL:
+            total_sell_qty += t.quantity
+
+    remaining = total_buy_qty - total_sell_qty
+    if remaining < 0:
+        raise CustomException(ErrorCode.BAD_REQUEST)
+
+    item.quantity = remaining
+    item.avg_price = (
+        total_buy_cost / total_buy_qty if total_buy_qty > 0 else Decimal("0.00")
+    )
+    await db.flush()
+
+
+async def update_portfolio_transaction(
+    db: AsyncSession, household: Household, tx_id: UUID, req: PortfolioTxUpdateRequest,
+) -> PortfolioTxResponse:
+    """거래 내역 수정 — 수정 후 해당 종목 자동 재계산"""
+    pt_repo = PortfolioTransactionRepository(db)
+    tx = await pt_repo.find_by_id(tx_id)
+    if not tx or tx.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    if req.quantity is not None:
+        tx.quantity = req.quantity
+    if req.price is not None:
+        tx.price = req.price
+    if req.tx_date is not None:
+        tx.tx_date = req.tx_date
+    if req.memo is not None:
+        tx.memo = req.memo
+    await db.flush()
+
+    # 종목 재계산 (tx 는 BUY/SELL 모두 portfolio_item_id 보유)
+    if tx.portfolio_item_id:
+        item_repo = PortfolioItemRepository(db)
+        item = await item_repo.find_by_id(tx.portfolio_item_id)
+        if item:
+            await _recalc_item_from_transactions(db, item)
+
+    logger.info("거래 수정 (tx_id=%s)", tx_id)
+
+    accounts = await AccountRepository(db).find_by_ids([tx.account_id])
+    return _build_tx_response(tx, {a.id: a for a in accounts})
+
+
+async def delete_portfolio_transaction(
+    db: AsyncSession, household: Household, tx_id: UUID,
+) -> None:
+    """거래 내역 soft delete — 삭제 후 해당 종목 자동 재계산"""
+    pt_repo = PortfolioTransactionRepository(db)
+    tx = await pt_repo.find_by_id(tx_id)
+    if not tx or tx.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    tx.data_stat_cd = DataStatus.DELETED
+    await db.flush()
+
+    if tx.portfolio_item_id:
+        item_repo = PortfolioItemRepository(db)
+        item = await item_repo.find_by_id(tx.portfolio_item_id)
+        if item:
+            await _recalc_item_from_transactions(db, item)
+
+    logger.info("거래 삭제 (tx_id=%s)", tx_id)
 
 
 async def delete_portfolio(
