@@ -140,7 +140,6 @@ CREATE TABLE fixed_expenses (
     id              UUID PRIMARY KEY,
     household_id    UUID NOT NULL,    -- logical FK -> households.id
     name            VARCHAR(100) NOT NULL,
-    amount          NUMERIC(15, 2) NOT NULL,
     day_of_month    INT NOT NULL,
     category_id     UUID,             -- logical FK -> categories.id
     color           VARCHAR(7),

@@ -27,7 +27,6 @@ def _build_response(fixed: FixedExpense, category_map: dict) -> FixedResponse:
         id=fixed.id,
         household_id=fixed.household_id,
         name=fixed.name,
-        amount=fixed.amount,
         day_of_month=fixed.day_of_month,
         category_id=fixed.category_id,
         category_name=category.name if category else None,
@@ -88,7 +87,6 @@ async def create_fixed_expense(
     fixed = FixedExpense(
         household_id=household.id,
         name=req.name.strip(),
-        amount=req.amount,
         day_of_month=req.day_of_month,
         category_id=req.category_id,
         color=req.color,
@@ -120,8 +118,6 @@ async def update_fixed_expense(
 
     if req.name is not None:
         fixed.name = req.name.strip()
-    if req.amount is not None:
-        fixed.amount = req.amount
     if req.day_of_month is not None:
         fixed.day_of_month = req.day_of_month
     if req.category_id is not None:
