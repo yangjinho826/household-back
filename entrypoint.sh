@@ -11,6 +11,8 @@ gosu appuser /app/.venv/bin/alembic upgrade head
 # appuser 로 전환하여 uvicorn 실행
 # --proxy-headers: nginx 가 보내는 X-Forwarded-Proto / X-Forwarded-For / Host 신뢰
 # --forwarded-allow-ips='*': 외부 노출은 nginx 만이라 와일드카드 OK
+# --no-access-log: 자체 AccessLogMiddleware 가 사용자/IP 포함 access log 를 단독으로 찍음 (중복 방지)
 exec gosu appuser /app/.venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 --port 8000 \
-    --proxy-headers --forwarded-allow-ips='*'
+    --proxy-headers --forwarded-allow-ips='*' \
+    --no-access-log

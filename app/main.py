@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.database import close_db, init_db
 from app.core.exceptions.handlers import register_exception_handlers
 from app.core.logging import setup_logging
+from app.core.middleware import AccessLogMiddleware
 from app.domain.account.router import router as account_router
 from app.domain.account_snapshot.router import router as account_snapshot_router
 from app.domain.auth.router import router as auth_router
@@ -46,6 +47,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(AccessLogMiddleware)
 app.include_router(health_router)
 app.include_router(user_router)
 app.include_router(auth_router)
