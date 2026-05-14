@@ -5,34 +5,20 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp
 
-from app.core.auth.jwt import decode_token
-
 logger = logging.getLogger("app.access")
 
-# `root_path="/api"` 가 적용된 환경에서 헬스체크 실제 path 는 `/api/health`.
-# endswith 매칭으로 root_path 유무 모두 커버.
-_HEALTH_PATHS: tuple[str, ...] = ("/health",)
+# root_path="/api" 적용 환경과 직접 경로 둘 다 매칭. endswith 는 /api/foo/health 같은
+# 무관한 경로도 잡을 위험이 있어 정확 매칭으로 좁힘.
+_HEALTH_PATHS: frozenset[str] = frozenset({"/health", "/api/health"})
 
 
 def _extract_user_id(request: Request) -> str:
-    """Authorization 헤더에서 JWT 디코드해 user id 추출 — 로그 전용 가벼운 호출.
+    """`get_current_user` Depends 가 박아둔 request.state.user_id 를 읽기만.
 
-    실제 인증은 Depends 계층(`get_current_active_user`)이 별도로 수행.
-    여기는 토큰 위조 시 anonymous 로 표시하기 위해 검증 포함된 decode_token 을 그대로 재사용.
+    토큰 검증은 Depends 가 단독으로 — middleware 는 결과만 활용.
+    인증 미통과(public, 401) 요청은 state 가 비어 자연스럽게 '-' 로 떨어짐.
     """
-    auth = request.headers.get("authorization", "")
-    if not auth.lower().startswith("bearer "):
-        return "-"
-    token = auth[7:].strip()
-    try:
-        payload = decode_token(token)
-    except Exception:
-        return "-"
-    return str(payload.get("sub") or "-")
-
-
-def _is_health_path(path: str) -> bool:
-    return any(path.endswith(p) for p in _HEALTH_PATHS)
+    return getattr(request.state, "user_id", None) or "-"
 
 
 class AccessLogMiddleware(BaseHTTPMiddleware):
@@ -52,14 +38,13 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
         client_ip = request.client.host if request.client else "-"
-        user_id = _extract_user_id(request)
 
         msg = (
             f"{request.method} {path} {response.status_code} "
-            f"user={user_id} ip={client_ip} {duration_ms:.0f}ms"
+            f"user={_extract_user_id(request)} ip={client_ip} {duration_ms:.0f}ms"
         )
 
-        if _is_health_path(path):
+        if path in _HEALTH_PATHS:
             logger.debug(msg)
         else:
             logger.info(msg)

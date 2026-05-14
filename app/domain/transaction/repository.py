@@ -158,18 +158,24 @@ class TransactionRepository:
                     sums["transfer_in"] += total
         return sums
 
-    async def sum_by_account_for_month(
-        self, account_id: UUID, year: int, month: int,
-    ) -> dict[str, Decimal]:
-        """account 단위 그 달 INCOME/EXPENSE/FIXED_EXPENSE 합계. TRANSFER 제외.
+    async def sum_monthly_for_household(
+        self, household_id: UUID, year: int, month: int,
+    ) -> dict[UUID, dict[str, Decimal]]:
+        """household 내 모든 account 의 그 달 INCOME/EXPENSE/FIXED_EXPENSE 합계.
 
-        account_snapshots 의 monthly_* 캐시 컬럼 박제용.
+        한 쿼리로 group_by(account_id, tx_type) — account 마다 호출하던 N+1 제거.
+        TRANSFER 는 가계부 단위 income/expense 통계에 무의미하므로 제외.
+        Returns: {account_id: {'income': X, 'expense': X, 'fixed_expense': X}}
         """
         stmt = (
-            select(Transaction.tx_type, func.sum(Transaction.amount).label("total"))
+            select(
+                Transaction.account_id,
+                Transaction.tx_type,
+                func.sum(Transaction.amount).label("total"),
+            )
             .where(
                 and_(
-                    Transaction.account_id == account_id,
+                    Transaction.household_id == household_id,
                     Transaction.data_stat_cd == DataStatus.ACTIVE,
                     Transaction.tx_type.in_(
                         [TxType.INCOME, TxType.EXPENSE, TxType.FIXED_EXPENSE]
@@ -178,23 +184,24 @@ class TransactionRepository:
                     func.extract("month", Transaction.tx_date) == month,
                 )
             )
-            .group_by(Transaction.tx_type)
+            .group_by(Transaction.account_id, Transaction.tx_type)
         )
         result = await self.db.execute(stmt)
 
-        sums: dict[str, Decimal] = {
-            "income": Decimal("0"),
-            "expense": Decimal("0"),
-            "fixed_expense": Decimal("0"),
-        }
         key_map = {
             TxType.INCOME: "income",
             TxType.EXPENSE: "expense",
             TxType.FIXED_EXPENSE: "fixed_expense",
         }
-        for tx_type, total in result.all():
-            sums[key_map[tx_type]] += total
-        return sums
+        out: dict[UUID, dict[str, Decimal]] = {}
+        for account_id, tx_type, total in result.all():
+            bucket = out.setdefault(account_id, {
+                "income": Decimal("0"),
+                "expense": Decimal("0"),
+                "fixed_expense": Decimal("0"),
+            })
+            bucket[key_map[tx_type]] += total
+        return out
 
     async def sum_by_category_for_month(
         self, household_id: UUID, year: int, month: int,

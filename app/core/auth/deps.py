@@ -3,7 +3,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import ExpiredSignatureError, JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 async def get_current_user(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -43,6 +44,9 @@ async def get_current_user(
     user = await UserRepository(db).find_by_id(UUID(sub))
     if not user:
         raise CustomException(ErrorCode.UNAUTHORIZED)
+
+    # AccessLogMiddleware 가 read-only 로 읽어 access log 의 user=<uuid> 에 사용.
+    request.state.user_id = str(user.id)
     return user
 
 

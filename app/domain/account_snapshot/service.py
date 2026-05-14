@@ -97,12 +97,19 @@ async def create_target_month_snapshot(
     ]
 
     tx_repo = TransactionRepository(db)
+    # 모든 account 의 월 합산을 한 번에 가져와 dict 룩업 — N+1 회피
+    monthly_sums = await tx_repo.sum_monthly_for_household(
+        household.id, target_date.year, target_date.month,
+    )
+    _empty_monthly = {
+        "income": Decimal("0"),
+        "expense": Decimal("0"),
+        "fixed_expense": Decimal("0"),
+    }
     snapshots: list[AccountSnapshot] = []
     for a in accounts:
         summary = await _calc_balance(tx_repo, a, db)
-        monthly = await tx_repo.sum_by_account_for_month(
-            a.id, target_date.year, target_date.month,
-        )
+        monthly = monthly_sums.get(a.id, _empty_monthly)
         snapshots.append(
             AccountSnapshot(
                 account_id=a.id,
