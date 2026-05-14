@@ -36,9 +36,13 @@ class TransactionCreateRequest(BaseModel):
         else:
             if self.to_account_id is not None:
                 raise CustomException(ErrorCode.BAD_REQUEST)
-        # 고정 지출 매핑은 expense 만
-        if self.fixed_expense_id is not None and self.tx_type != TxType.EXPENSE:
-            raise CustomException(ErrorCode.BAD_REQUEST)
+        # FIXED_EXPENSE 는 fixed_expense_id 필수. 그 외 유형은 매핑 금지.
+        if self.tx_type == TxType.FIXED_EXPENSE:
+            if self.fixed_expense_id is None:
+                raise CustomException(ErrorCode.BAD_REQUEST)
+        else:
+            if self.fixed_expense_id is not None:
+                raise CustomException(ErrorCode.BAD_REQUEST)
         return self
 
 

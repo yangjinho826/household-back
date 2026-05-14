@@ -146,7 +146,10 @@ class TransactionRepository:
         for tx_type, acc_id, to_acc_id, total in result.all():
             if tx_type == TxType.INCOME and acc_id == account_id:
                 sums["income"] += total
-            elif tx_type == TxType.EXPENSE and acc_id == account_id:
+            elif (
+                tx_type in (TxType.EXPENSE, TxType.FIXED_EXPENSE)
+                and acc_id == account_id
+            ):
                 sums["expense"] += total
             elif tx_type == TxType.TRANSFER:
                 if acc_id == account_id:
@@ -181,7 +184,10 @@ class TransactionRepository:
     async def sum_by_fixed_for_month(
         self, household_id: UUID, year: int, month: int,
     ) -> list[tuple[UUID, Decimal]]:
-        """fixed_expense_id 별 해당 월 EXPENSE 합계 — 고정지출별 누적 사용액"""
+        """fixed_expense_id 별 해당 월 지출 합계 — 고정지출별 누적 사용액.
+
+        EXPENSE 와 FIXED_EXPENSE 둘 다 포함 (기존 EXPENSE+fixed_expense_id 호환).
+        """
         stmt = (
             select(
                 Transaction.fixed_expense_id,
@@ -193,7 +199,9 @@ class TransactionRepository:
                     func.extract("year", Transaction.tx_date) == year,
                     func.extract("month", Transaction.tx_date) == month,
                     Transaction.fixed_expense_id.is_not(None),
-                    Transaction.tx_type == TxType.EXPENSE,
+                    Transaction.tx_type.in_(
+                        [TxType.EXPENSE, TxType.FIXED_EXPENSE]
+                    ),
                     Transaction.data_stat_cd == DataStatus.ACTIVE,
                 )
             )
@@ -230,8 +238,8 @@ class TransactionRepository:
         for tx_type, total in result.all():
             if tx_type == TxType.INCOME:
                 sums["income"] = Decimal(total)
-            elif tx_type == TxType.EXPENSE:
-                sums["expense"] = Decimal(total)
+            elif tx_type in (TxType.EXPENSE, TxType.FIXED_EXPENSE):
+                sums["expense"] += Decimal(total)
             elif tx_type == TxType.TRANSFER:
                 sums["transfer"] = Decimal(total)
         return sums

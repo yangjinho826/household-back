@@ -263,7 +263,7 @@ async def get_calendar(
         if tx_type == TxType.INCOME:
             d["income"] += total
             monthly_income += total
-        elif tx_type == TxType.EXPENSE:
+        elif tx_type in (TxType.EXPENSE, TxType.FIXED_EXPENSE):
             d["expense"] += total
             monthly_expense += total
         elif tx_type == TxType.TRANSFER:
