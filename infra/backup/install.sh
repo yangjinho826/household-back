@@ -28,6 +28,16 @@ set +a
 : "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY 누락}"
 : "${R2_BUCKET:?R2_BUCKET 누락}"
 
+# 호스트 timezone KST 보장 — cron `0 3 * * *` 과 파일명 `date +%Y-%m-%d_...` 모두 KST 기준이어야 함.
+# Lightsail Ubuntu 기본은 UTC 라 그대로면 cron 03:00 이 KST 12:00 에 실행되고 파일명도 전날로 찍힘.
+CURRENT_TZ=$(timedatectl show -p Timezone --value 2>/dev/null || echo "unknown")
+if [[ "$CURRENT_TZ" != "Asia/Seoul" ]]; then
+  echo "[install] 호스트 timezone 변경: $CURRENT_TZ → Asia/Seoul"
+  sudo timedatectl set-timezone Asia/Seoul
+else
+  echo "[install] 호스트 timezone 이미 Asia/Seoul"
+fi
+
 # 2. rclone 설치
 if ! command -v rclone >/dev/null 2>&1; then
   echo "[install] rclone 설치"

@@ -43,6 +43,7 @@ bash infra/backup/install.sh
 
 `install.sh` 가 처리하는 것:
 
+- 호스트 timezone `Asia/Seoul` 자동 설정 (cron + 파일명 모두 KST 기준이 되도록)
 - `rclone`, `gettext-base` (envsubst) 설치
 - `~/.config/rclone/rclone.conf` 자동 생성 (퍼미션 600)
 - R2 연결 테스트 (`rclone lsd r2:household-backup`)
@@ -83,6 +84,15 @@ docker compose exec postgres psql -U household -d postgres \
 
 운영 DB 직접 덮어쓰는 건 위험 — 항상 임시 DB 에 restore 해서 검증 후 데이터 옮기는 패턴 권장.
 
+## 로그 확인
+
+- `/var/log/household-backup.log` — cron 출력. 성공 시 `[ISO timestamp] backup OK: ...` 한 줄, 실패 시 stderr 도 같이 남음
+- 실시간: `tail -f /var/log/household-backup.log`
+- 마지막 N줄: `tail -100 /var/log/household-backup.log`
+- R2 콘솔 `household-backup` 버킷 — 업로드된 파일 목록 자체가 두 번째 로그 역할
+
+윈도우 PC 가 아니라 **Lightsail 호스트 안의 경로** — SSH 들어가서 확인 (`ssh ubuntu@<lightsail-ip>`).
+
 ## 트러블슈팅
 
 | 증상 | 원인 / 조치 |
@@ -91,6 +101,7 @@ docker compose exec postgres psql -U household -d postgres \
 | `rclone lsd r2:...` 실패 | 토큰 권한 (`Object Read & Write`) 또는 버킷 범위 (`household-backup` 한정) 잘못. R2 대시보드에서 토큰 재발급 |
 | `docker compose exec postgres pg_dump` 가 멈춤 | postgres 컨테이너 안 떠있음 — `docker compose ps` 확인 |
 | 다음 날 백업 로그 없음 | `crontab -l` 로 `# household-backup` 라인 확인. 없으면 `install.sh` 재실행 |
+| 백업 파일명 날짜가 하루 전 / cron 03:00 이 한국 시각 아님 | 호스트 timezone 이 UTC. `sudo timedatectl set-timezone Asia/Seoul` 또는 `install.sh` 재실행 |
 | R2 비용 알림 메일 옴 | 즉시 `rclone size r2:household-backup` 로 사용량 확인. 30일 retention 안 도는지 점검 |
 
 ## 변경 시 주의
