@@ -158,6 +158,44 @@ class TransactionRepository:
                     sums["transfer_in"] += total
         return sums
 
+    async def sum_by_account_for_month(
+        self, account_id: UUID, year: int, month: int,
+    ) -> dict[str, Decimal]:
+        """account 단위 그 달 INCOME/EXPENSE/FIXED_EXPENSE 합계. TRANSFER 제외.
+
+        account_snapshots 의 monthly_* 캐시 컬럼 박제용.
+        """
+        stmt = (
+            select(Transaction.tx_type, func.sum(Transaction.amount).label("total"))
+            .where(
+                and_(
+                    Transaction.account_id == account_id,
+                    Transaction.data_stat_cd == DataStatus.ACTIVE,
+                    Transaction.tx_type.in_(
+                        [TxType.INCOME, TxType.EXPENSE, TxType.FIXED_EXPENSE]
+                    ),
+                    func.extract("year", Transaction.tx_date) == year,
+                    func.extract("month", Transaction.tx_date) == month,
+                )
+            )
+            .group_by(Transaction.tx_type)
+        )
+        result = await self.db.execute(stmt)
+
+        sums: dict[str, Decimal] = {
+            "income": Decimal("0"),
+            "expense": Decimal("0"),
+            "fixed_expense": Decimal("0"),
+        }
+        key_map = {
+            TxType.INCOME: "income",
+            TxType.EXPENSE: "expense",
+            TxType.FIXED_EXPENSE: "fixed_expense",
+        }
+        for tx_type, total in result.all():
+            sums[key_map[tx_type]] += total
+        return sums
+
     async def sum_by_category_for_month(
         self, household_id: UUID, year: int, month: int,
     ) -> list[tuple[UUID, Decimal]]:

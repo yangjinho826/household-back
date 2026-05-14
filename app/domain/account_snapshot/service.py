@@ -48,7 +48,10 @@ def _build_month(
     account_map: dict,
 ) -> SnapshotMonth:
     items = []
-    total = Decimal("0.00")
+    total_balance = Decimal("0.00")
+    total_income = Decimal("0.00")
+    total_expense = Decimal("0.00")
+    total_fixed_expense = Decimal("0.00")
     for s in snapshots:
         a = account_map.get(s.account_id)
         items.append(
@@ -56,12 +59,21 @@ def _build_month(
                 account_id=s.account_id,
                 account_name=a.name if a else "(삭제됨)",
                 balance=s.balance,
+                monthly_income=s.monthly_income,
+                monthly_expense=s.monthly_expense,
+                monthly_fixed_expense=s.monthly_fixed_expense,
             )
         )
-        total += s.balance
+        total_balance += s.balance
+        total_income += s.monthly_income
+        total_expense += s.monthly_expense
+        total_fixed_expense += s.monthly_fixed_expense
     return SnapshotMonth(
         snapshot_date=snapshot_date,
-        total_balance=total,
+        total_balance=total_balance,
+        total_income=total_income,
+        total_expense=total_expense,
+        total_fixed_expense=total_fixed_expense,
         accounts=items,
     )
 
@@ -88,11 +100,17 @@ async def create_target_month_snapshot(
     snapshots: list[AccountSnapshot] = []
     for a in accounts:
         summary = await _calc_balance(tx_repo, a, db)
+        monthly = await tx_repo.sum_by_account_for_month(
+            a.id, target_date.year, target_date.month,
+        )
         snapshots.append(
             AccountSnapshot(
                 account_id=a.id,
                 snapshot_date=target_date,
                 balance=summary.balance,
+                monthly_income=monthly["income"],
+                monthly_expense=monthly["expense"],
+                monthly_fixed_expense=monthly["fixed_expense"],
                 data_stat_cd=DataStatus.ACTIVE,
             )
         )

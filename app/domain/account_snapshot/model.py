@@ -20,3 +20,13 @@ class AccountSnapshot(BaseEntity):
     account_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
     balance: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    # 그 달 흐름 캐시 — 매번 transactions 합산 안 하려고 박제 시점에 같이 박음.
+    monthly_income: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("0"),
+    )
+    monthly_expense: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("0"),
+    )
+    monthly_fixed_expense: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("0"),
+    )

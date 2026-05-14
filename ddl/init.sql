@@ -229,13 +229,16 @@ CREATE INDEX idx_pvh_item_date ON portfolio_value_history(portfolio_item_id, sna
 -- 10. account_snapshots — 월말 통장 잔액 스냅샷
 -- =============================================================================
 CREATE TABLE account_snapshots (
-    id              UUID PRIMARY KEY,
-    account_id      UUID NOT NULL,    -- logical FK -> accounts.id
-    snapshot_date   DATE NOT NULL,
-    balance         NUMERIC(15, 2) NOT NULL,
-    data_stat_cd    VARCHAR(30) NOT NULL,
-    frst_reg_dt     TIMESTAMPTZ NOT NULL,
-    last_mdfcn_dt   TIMESTAMPTZ NOT NULL
+    id                       UUID PRIMARY KEY,
+    account_id               UUID NOT NULL,    -- logical FK -> accounts.id
+    snapshot_date            DATE NOT NULL,
+    balance                  NUMERIC(15, 2) NOT NULL,
+    monthly_income           NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    monthly_expense          NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    monthly_fixed_expense    NUMERIC(15, 2) NOT NULL DEFAULT 0,
+    data_stat_cd             VARCHAR(30) NOT NULL,
+    frst_reg_dt              TIMESTAMPTZ NOT NULL,
+    last_mdfcn_dt            TIMESTAMPTZ NOT NULL
 );
 
 CREATE INDEX idx_snapshots_account_date ON account_snapshots(account_id, snapshot_date DESC);
