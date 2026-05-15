@@ -74,7 +74,7 @@ sudo chown "$USER" "$LOG_FILE"
 
 # 6. cron 등록 (기존 household-backup 라인 제거 후 재등록)
 CRON_LINE="0 3 * * * $BACKUP_SCRIPT >> $LOG_FILE 2>&1 # household-backup"
-( crontab -l 2>/dev/null | grep -v "# household-backup" ; echo "$CRON_LINE" ) | crontab -
+{ crontab -l 2>/dev/null | grep -v "# household-backup" || true; echo "$CRON_LINE"; } | crontab -
 echo "[install] cron 등록 완료 — 매일 03:00 KST 백업"
 
 chmod +x "$BACKUP_SCRIPT"
