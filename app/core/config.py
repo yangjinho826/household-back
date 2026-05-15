@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # 쿠키 — HTTPS 환경에서만 True. HTTP 운영이면 임시로 False.
     COOKIE_SECURE: bool = True
 
+    # 스케줄러 — 운영 단일 인스턴스에서만 true. 다중 워커일 때도 advisory lock 안전망 작동.
+    SCHEDULER_ENABLED: bool = False
+
     @field_validator("JWT_SECRET")
     @classmethod
     def validate_jwt_secret(cls, v: str) -> str:

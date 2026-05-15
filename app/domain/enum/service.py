@@ -3,7 +3,7 @@ from enum import Enum
 from app.core.exceptions import CustomException, ErrorCode
 from app.domain.account.enum import AccountType
 from app.domain.category.enum import CategoryKind
-from app.domain.portfolio.enum import PortfolioTxType
+from app.domain.portfolio.enum import Market, PortfolioTxType
 from app.domain.transaction.enum import TxType
 
 # enum 이름(URL path) → 클래스 매핑
@@ -13,6 +13,7 @@ _DISPATCH: dict[str, type[Enum]] = {
     "category-kind": CategoryKind,
     "tx-type": TxType,
     "portfolio-tx-type": PortfolioTxType,
+    "portfolio-market": Market,
 }
 
 

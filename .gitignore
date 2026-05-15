@@ -8,3 +8,5 @@ __pycache__/
 .serena/
 logs/
 .dockerignore
+# 로컬 개발 전용 docker compose override (포트 노출 등) — 운영 X
+docker-compose.override.yml

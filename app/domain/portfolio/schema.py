@@ -6,7 +6,7 @@ from pydantic import BaseModel, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.types import Money, Quantity, Rate
-from app.domain.portfolio.enum import PortfolioTxType
+from app.domain.portfolio.enum import Market, PortfolioTxType
 
 
 class PortfolioCreateRequest(BaseModel):
@@ -14,6 +14,7 @@ class PortfolioCreateRequest(BaseModel):
 
     ticker: str
     symbol: str | None = None
+    market: Market
     current_price: Decimal
     account_id: UUID
 
@@ -49,6 +50,7 @@ class PortfolioUpdateRequest(BaseModel):
     current_price: Decimal | None = None
     ticker: str | None = None
     symbol: str | None = None
+    market: Market | None = None
     is_archived: bool | None = None
 
     @model_validator(mode="after")
@@ -102,6 +104,7 @@ class PortfolioResponse(BaseModel):
     account_name: str
     ticker: str
     symbol: str | None
+    market: Market
     quantity: Quantity
     avg_price: Money
     current_price: Money

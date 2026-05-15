@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import CHAR, DateTime, Index, String, Text
+from sqlalchemy import DateTime, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.model import BaseEntity
@@ -18,7 +18,6 @@ class Household(BaseEntity):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
-    currency: Mapped[str] = mapped_column(CHAR(3), nullable=False)
     started_at: Mapped[date] = mapped_column(nullable=False)
 
 

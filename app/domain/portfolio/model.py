@@ -21,6 +21,7 @@ class PortfolioItem(BaseEntity):
     account_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     ticker: Mapped[str] = mapped_column(String(100), nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    market: Mapped[str] = mapped_column(String(20), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     avg_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     current_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)

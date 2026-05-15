@@ -42,6 +42,8 @@ services:
     environment:
       DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       TZ: Asia/Seoul
+      # 시세/환율 자동 갱신 스케줄러 — 단일 인스턴스 운영이라 안전. 다중 워커여도 advisory lock 으로 보호.
+      SCHEDULER_ENABLED: "true"
     networks:
       - backend
       - household-net

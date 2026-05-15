@@ -10,7 +10,7 @@ from app.core.exceptions import CustomException, ErrorCode
 from app.domain.account.enum import AccountType
 from app.domain.account.repository import AccountRepository
 from app.domain.household.model import Household
-from app.domain.portfolio.enum import PortfolioTxType
+from app.domain.portfolio.enum import Market, PortfolioTxType
 from app.domain.portfolio.model import (
     PortfolioItem,
     PortfolioTransaction,
@@ -49,6 +49,7 @@ def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse
         account_name=account.name if account else "(삭제됨)",
         ticker=item.ticker,
         symbol=item.symbol,
+        market=Market(item.market),
         quantity=item.quantity,
         avg_price=item.avg_price,
         current_price=item.current_price,
@@ -121,6 +122,7 @@ async def create_portfolio(
         account_id=req.account_id,
         ticker=req.ticker.strip(),
         symbol=req.symbol,
+        market=req.market.value,
         quantity=Decimal("0.0000"),
         avg_price=Decimal("0.00"),
         current_price=req.current_price,
@@ -129,8 +131,8 @@ async def create_portfolio(
     )
     await PortfolioItemRepository(db).save(item)
     logger.info(
-        "종목 등록 (account_id=%s, ticker=%s, current_price=%s)",
-        req.account_id, item.ticker, req.current_price,
+        "종목 등록 (account_id=%s, ticker=%s, market=%s, current_price=%s)",
+        req.account_id, item.ticker, item.market, req.current_price,
     )
 
     accounts = await AccountRepository(db).find_by_ids([item.account_id])
@@ -198,6 +200,8 @@ async def update_portfolio(
         item.ticker = req.ticker.strip()
     if req.symbol is not None:
         item.symbol = req.symbol
+    if req.market is not None:
+        item.market = req.market.value
     if req.is_archived is not None:
         item.is_archived = req.is_archived
 

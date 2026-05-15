@@ -37,7 +37,6 @@ CREATE TABLE households (
     name            VARCHAR(100) NOT NULL,
     description     TEXT,
     owner_id        UUID NOT NULL,    -- logical FK -> users.id
-    currency        CHAR(3) NOT NULL,
     started_at      DATE NOT NULL,
     data_stat_cd    VARCHAR(30) NOT NULL,
     frst_reg_dt     TIMESTAMPTZ NOT NULL,
@@ -163,6 +162,7 @@ CREATE TABLE portfolio_items (
     account_id      UUID NOT NULL,    -- logical FK -> accounts.id (broker)
     ticker          VARCHAR(100) NOT NULL,
     symbol          VARCHAR(50),
+    market          VARCHAR(20) NOT NULL,    -- KRX_KOSPI / KRX_KOSDAQ / NASDAQ / NYSE
     quantity        NUMERIC(15, 4) NOT NULL,
     avg_price       NUMERIC(15, 2) NOT NULL,
     current_price   NUMERIC(15, 2) NOT NULL,
@@ -243,6 +243,24 @@ CREATE TABLE account_snapshots (
 
 CREATE INDEX idx_snapshots_account_date ON account_snapshots(account_id, snapshot_date DESC);
 CREATE INDEX idx_snapshots_date ON account_snapshots(snapshot_date DESC);
+
+
+-- =============================================================================
+-- 10-1. exchange_rates — 환율 시계열 (USD → KRW 매일 박제)
+-- =============================================================================
+CREATE TABLE exchange_rates (
+    id              UUID PRIMARY KEY,
+    snapshot_date   DATE NOT NULL,
+    base_currency   CHAR(3) NOT NULL,    -- "USD"
+    quote_currency  CHAR(3) NOT NULL,    -- "KRW"
+    rate            NUMERIC(15, 4) NOT NULL,    -- 1 base = N quote
+    data_stat_cd    VARCHAR(30) NOT NULL,
+    frst_reg_dt     TIMESTAMPTZ NOT NULL,
+    last_mdfcn_dt   TIMESTAMPTZ NOT NULL
+);
+
+CREATE UNIQUE INDEX uq_exchange_rates_date_pair
+    ON exchange_rates(snapshot_date, base_currency, quote_currency);
 
 
 -- =============================================================================

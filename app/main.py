@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -9,6 +10,7 @@ from app.core.database import close_db, init_db
 from app.core.exceptions.handlers import register_exception_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import AccessLogMiddleware
+from app.core.scheduler import register_jobs, scheduler
 from app.domain.account.router import router as account_router
 from app.domain.account_snapshot.router import router as account_snapshot_router
 from app.domain.auth.router import router as auth_router
@@ -23,13 +25,21 @@ from app.domain.transaction.router import router as transaction_router
 from app.domain.user.router import router as user_router
 
 setup_logging()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """앱 시작/종료 시 실행되는 라이프사이클 관리"""
     await init_db()
+    if settings.SCHEDULER_ENABLED:
+        register_jobs()
+        scheduler.start()
+        logger.info("스케줄러 시작 (SCHEDULER_ENABLED=true)")
     yield
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        logger.info("스케줄러 종료")
     await close_db()
 
 

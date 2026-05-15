@@ -31,7 +31,6 @@ def _build_response(household: Household, role: HouseholdRole) -> HouseholdRespo
         name=household.name,
         description=household.description,
         owner_id=household.owner_id,
-        currency=household.currency,
         started_at=household.started_at,
         role=role,
     )
@@ -61,7 +60,6 @@ async def create_household(
         name=req.name.strip(),
         description=req.description,
         owner_id=current_user.id,
-        currency=req.currency.upper(),
         started_at=req.started_at or date.today(),
         data_stat_cd=DataStatus.ACTIVE,
     )
@@ -98,8 +96,6 @@ async def update_household(
         household.name = req.name.strip()
     if req.description is not None:
         household.description = req.description
-    if req.currency is not None:
-        household.currency = req.currency.upper()
     if req.started_at is not None:
         household.started_at = req.started_at
 

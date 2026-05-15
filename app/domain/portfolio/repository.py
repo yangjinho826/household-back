@@ -2,11 +2,11 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
-from app.domain.portfolio.enum import PortfolioTxType
+from app.domain.portfolio.enum import Market, PortfolioTxType
 from app.domain.portfolio.model import (
     PortfolioItem,
     PortfolioTransaction,
@@ -94,6 +94,54 @@ class PortfolioItemRepository:
     async def save(self, item: PortfolioItem) -> None:
         self.db.add(item)
         await self.db.flush()
+
+    async def find_active_distinct_ticker_market_by_markets(
+        self, markets: list[Market],
+    ) -> list[tuple[str, Market]]:
+        """전 가계부 통틀어 (ticker, market) DISTINCT 추출 — 시세 갱신 단위.
+
+        같은 ticker 가 여러 가계부에 있어도 Yahoo 호출은 1회만 하기 위해 dedup.
+        """
+        if not markets:
+            return []
+        market_values = [m.value for m in markets]
+        result = await self.db.execute(
+            select(PortfolioItem.ticker, PortfolioItem.market)
+            .where(
+                and_(
+                    PortfolioItem.market.in_(market_values),
+                    PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .distinct()
+        )
+        return [(row.ticker, Market(row.market)) for row in result]
+
+    async def bulk_update_current_price_by_ticker_market(
+        self, prices: dict[tuple[str, Market], Decimal],
+    ) -> int:
+        """ticker+market 매치되는 모든 active row 의 current_price 일괄 update.
+
+        같은 종목 가진 모든 가계부 row 가 한 번에 갱신됨. 영향받은 row 수 반환.
+        """
+        if not prices:
+            return 0
+        affected = 0
+        for (ticker, market), price in prices.items():
+            result = await self.db.execute(
+                update(PortfolioItem)
+                .where(
+                    and_(
+                        PortfolioItem.ticker == ticker,
+                        PortfolioItem.market == market.value,
+                        PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
+                    )
+                )
+                .values(current_price=price)
+            )
+            affected += result.rowcount or 0
+        await self.db.flush()
+        return affected
 
 
 class PortfolioTransactionRepository:
