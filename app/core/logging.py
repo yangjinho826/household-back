@@ -41,3 +41,6 @@ def setup_logging() -> None:
         uv_logger = logging.getLogger(name)
         uv_logger.handlers.clear()
         uv_logger.propagate = True
+
+    # uvicorn 의 기본 access 로그는 AccessLogMiddleware 와 중복 — WARNING 으로 묵음
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
