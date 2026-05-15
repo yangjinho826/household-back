@@ -21,7 +21,7 @@ class Transaction(BaseEntity):
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
-    tx_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    tx_type: Mapped[str] = mapped_column(String(20), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     tx_date: Mapped[date] = mapped_column(Date, nullable=False)
     account_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
