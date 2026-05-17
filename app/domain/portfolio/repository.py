@@ -55,15 +55,16 @@ class PortfolioItemRepository:
         )
         return list(result.scalars().all())
 
-    async def find_active_by_account_and_ticker(
-        self, account_id: UUID, ticker: str,
+    async def find_active_by_account_country_code(
+        self, account_id: UUID, country: str, code: str,
     ) -> PortfolioItem | None:
-        """누적 매수 시 같은 종목 있는지 확인"""
+        """누적 매수 시 같은 종목 있는지 확인 — (account, country, code) 기준"""
         result = await self.db.execute(
             select(PortfolioItem).where(
                 and_(
                     PortfolioItem.account_id == account_id,
-                    PortfolioItem.ticker == ticker,
+                    PortfolioItem.country == country,
+                    PortfolioItem.code == code,
                     PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
                 )
             )

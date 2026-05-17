@@ -8,9 +8,11 @@ from app.core.api_response import ApiResponse
 from app.core.database import get_db
 from app.domain.household.deps import CurrentHousehold
 from app.domain.portfolio import service
+from app.domain.portfolio.enum import Country
 from app.domain.portfolio.schema import (
     PortfolioBuyRequest,
     PortfolioCreateRequest,
+    PortfolioLookupResponse,
     PortfolioResponse,
     PortfolioSellRequest,
     PortfolioTxResponse,
@@ -20,6 +22,17 @@ from app.domain.portfolio.schema import (
 )
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+
+
+@router.get("/lookup")
+async def lookup_stock(
+    household: CurrentHousehold,  # 인증만 — 결과는 가계부와 무관한 공개 정보
+    country: Country = Query(...),
+    code: str = Query(..., min_length=1, max_length=50),
+) -> ApiResponse[PortfolioLookupResponse]:
+    """야후 파이낸스로 종목명 + 현재가 조회 — 폼 자동 채움용 (저장 X)"""
+    response = await service.lookup_stock(country, code)
+    return ApiResponse.ok(data=response)
 
 
 @router.get("/list")

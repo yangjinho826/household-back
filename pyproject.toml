@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.48",
     "tzdata>=2026.2",
     "uvicorn>=0.42.0",
+    "yfinance>=0.2.40",
 ]
 
 [dependency-groups]

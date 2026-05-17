@@ -10,7 +10,7 @@ from app.core.exceptions import CustomException, ErrorCode
 from app.domain.account.enum import AccountType
 from app.domain.account.repository import AccountRepository
 from app.domain.household.model import Household
-from app.domain.portfolio.enum import PortfolioTxType
+from app.domain.portfolio.enum import Country, PortfolioTxType
 from app.domain.portfolio.model import (
     PortfolioItem,
     PortfolioTransaction,
@@ -24,6 +24,7 @@ from app.domain.portfolio.repository import (
 from app.domain.portfolio.schema import (
     PortfolioBuyRequest,
     PortfolioCreateRequest,
+    PortfolioLookupResponse,
     PortfolioResponse,
     PortfolioSellRequest,
     PortfolioTxResponse,
@@ -32,6 +33,7 @@ from app.domain.portfolio.schema import (
     PortfolioValueHistoryByItem,
     PortfolioValueHistoryPoint,
 )
+from app.domain.portfolio.yahoo import lookup as yahoo_lookup
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +49,9 @@ def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse
         id=item.id,
         account_id=item.account_id,
         account_name=account.name if account else "(삭제됨)",
-        ticker=item.ticker,
-        symbol=item.symbol,
+        name=item.name,
+        code=item.code,
+        country=Country(item.country),
         quantity=item.quantity,
         avg_price=item.avg_price,
         current_price=item.current_price,
@@ -66,8 +69,9 @@ def _build_tx_response(tx: PortfolioTransaction, account_map: dict) -> Portfolio
         id=tx.id,
         account_id=tx.account_id,
         account_name=account.name if account else "(삭제됨)",
-        ticker=tx.ticker,
-        symbol=tx.symbol,
+        name=tx.name,
+        code=tx.code,
+        country=Country(tx.country),
         pt_type=tx.pt_type,
         quantity=tx.quantity,
         price=tx.price,
@@ -90,6 +94,18 @@ async def _validate_investment_account(
     if a.account_type != AccountType.INVESTMENT:
         raise CustomException(ErrorCode.BAD_REQUEST)
     return a
+
+
+async def lookup_stock(country: Country, code: str) -> PortfolioLookupResponse:
+    """야후 파이낸스로 종목명 + 현재가 조회 — 폼 자동 채움용"""
+    name, price, yahoo_symbol = await yahoo_lookup(country, code)
+    return PortfolioLookupResponse(
+        country=country,
+        code=code.strip(),
+        name=name,
+        current_price=price,
+        yahoo_symbol=yahoo_symbol,
+    )
 
 
 async def list_portfolio(
@@ -119,8 +135,9 @@ async def create_portfolio(
     item = PortfolioItem(
         household_id=household.id,
         account_id=req.account_id,
-        ticker=req.ticker.strip(),
-        symbol=req.symbol,
+        name=req.name.strip(),
+        code=req.code.strip(),
+        country=req.country.value,
         quantity=Decimal("0.0000"),
         avg_price=Decimal("0.00"),
         current_price=req.current_price,
@@ -129,8 +146,8 @@ async def create_portfolio(
     )
     await PortfolioItemRepository(db).save(item)
     logger.info(
-        "종목 등록 (account_id=%s, ticker=%s, current_price=%s)",
-        req.account_id, item.ticker, req.current_price,
+        "종목 등록 (account_id=%s, country=%s, code=%s, name=%s, current_price=%s)",
+        req.account_id, item.country, item.code, item.name, req.current_price,
     )
 
     accounts = await AccountRepository(db).find_by_ids([item.account_id])
@@ -153,8 +170,9 @@ async def buy(
         household_id=household.id,
         account_id=item.account_id,
         portfolio_item_id=item.id,
-        ticker=item.ticker,
-        symbol=item.symbol,
+        name=item.name,
+        code=item.code,
+        country=item.country,
         pt_type=PortfolioTxType.BUY,
         quantity=req.quantity,
         price=req.price,
@@ -194,10 +212,12 @@ async def update_portfolio(
 
     if req.current_price is not None:
         item.current_price = req.current_price
-    if req.ticker is not None:
-        item.ticker = req.ticker.strip()
-    if req.symbol is not None:
-        item.symbol = req.symbol
+    if req.name is not None:
+        item.name = req.name.strip()
+    if req.code is not None:
+        item.code = req.code.strip()
+    if req.country is not None:
+        item.country = req.country.value
     if req.is_archived is not None:
         item.is_archived = req.is_archived
 
@@ -226,8 +246,9 @@ async def sell(
         household_id=household.id,
         account_id=item.account_id,
         portfolio_item_id=item.id,
-        ticker=item.ticker,
-        symbol=item.symbol,
+        name=item.name,
+        code=item.code,
+        country=item.country,
         pt_type=PortfolioTxType.SELL,
         quantity=req.quantity,
         price=req.sell_price,
@@ -446,8 +467,9 @@ async def get_value_history_by_account(
         PortfolioValueHistoryByItem(
             portfolio_item_id=item_id,
             account_id=account_id,
-            ticker=item_map[item_id].ticker if item_id in item_map else "(삭제됨)",
-            symbol=item_map[item_id].symbol if item_id in item_map else None,
+            name=item_map[item_id].name if item_id in item_map else "(삭제됨)",
+            code=item_map[item_id].code if item_id in item_map else "",
+            country=Country(item_map[item_id].country) if item_id in item_map else Country.KR,
             history=[_to_history_point(p) for p in points],
         )
         for item_id, points in grouped.items()
@@ -475,7 +497,8 @@ async def get_value_history_by_item(
     return PortfolioValueHistoryByItem(
         portfolio_item_id=item.id,
         account_id=item.account_id,
-        ticker=item.ticker,
-        symbol=item.symbol,
+        name=item.name,
+        code=item.code,
+        country=Country(item.country),
         history=[_to_history_point(r) for r in rows],
     )

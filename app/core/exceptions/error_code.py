@@ -38,6 +38,9 @@ class ErrorCode(Enum):
     # 자산 스냅샷 (SN)
     SNAPSHOT_ALREADY_EXISTS = (400, "SN001", "이번 달 자산 스냅샷이 이미 저장되었습니다.")
 
+    # 포트폴리오 (PT)
+    STOCK_LOOKUP_FAILED = (404, "PT001", "종목 조회에 실패했습니다.")
+
     def __init__(self, status: int, code: str, message: str) -> None:
         self.status = status
         self.code = code

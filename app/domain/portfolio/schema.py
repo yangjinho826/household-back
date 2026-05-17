@@ -6,24 +6,37 @@ from pydantic import BaseModel, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.types import Money, Quantity, Rate
-from app.domain.portfolio.enum import PortfolioTxType
+from app.domain.portfolio.enum import Country, PortfolioTxType
 
 
 class PortfolioCreateRequest(BaseModel):
     """종목 등록 — 메타만 (수량/매수가는 매수 액션에서)"""
 
-    ticker: str
-    symbol: str | None = None
+    name: str
+    code: str
+    country: Country
     current_price: Decimal
     account_id: UUID
 
     @model_validator(mode="after")
     def _validate(self) -> "PortfolioCreateRequest":
-        if not (1 <= len(self.ticker.strip()) <= 100):
+        if not (1 <= len(self.name.strip()) <= 100):
+            raise CustomException(ErrorCode.BAD_REQUEST)
+        if not (1 <= len(self.code.strip()) <= 50):
             raise CustomException(ErrorCode.BAD_REQUEST)
         if self.current_price <= 0:
             raise CustomException(ErrorCode.BAD_REQUEST)
         return self
+
+
+class PortfolioLookupResponse(BaseModel):
+    """야후 파이낸스 종목 조회 결과 — 폼 자동 채움용"""
+
+    country: Country
+    code: str
+    name: str
+    current_price: Money
+    yahoo_symbol: str
 
 
 class PortfolioBuyRequest(BaseModel):
@@ -47,15 +60,18 @@ class PortfolioUpdateRequest(BaseModel):
     """평가액/메타 수정 (transaction 무관)"""
 
     current_price: Decimal | None = None
-    ticker: str | None = None
-    symbol: str | None = None
+    name: str | None = None
+    code: str | None = None
+    country: Country | None = None
     is_archived: bool | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> "PortfolioUpdateRequest":
         if self.current_price is not None and self.current_price < 0:
             raise CustomException(ErrorCode.BAD_REQUEST)
-        if self.ticker is not None and not (1 <= len(self.ticker.strip()) <= 100):
+        if self.name is not None and not (1 <= len(self.name.strip()) <= 100):
+            raise CustomException(ErrorCode.BAD_REQUEST)
+        if self.code is not None and not (1 <= len(self.code.strip()) <= 50):
             raise CustomException(ErrorCode.BAD_REQUEST)
         return self
 
@@ -100,8 +116,9 @@ class PortfolioResponse(BaseModel):
     id: UUID
     account_id: UUID
     account_name: str
-    ticker: str
-    symbol: str | None
+    name: str
+    code: str
+    country: Country
     quantity: Quantity
     avg_price: Money
     current_price: Money
@@ -118,8 +135,9 @@ class PortfolioTxResponse(BaseModel):
     id: UUID
     account_id: UUID
     account_name: str
-    ticker: str
-    symbol: str | None
+    name: str
+    code: str
+    country: Country
     pt_type: PortfolioTxType
     quantity: Quantity
     price: Money
@@ -144,6 +162,7 @@ class PortfolioValueHistoryByItem(BaseModel):
 
     portfolio_item_id: UUID
     account_id: UUID
-    ticker: str
-    symbol: str | None
+    name: str
+    code: str
+    country: Country
     history: list[PortfolioValueHistoryPoint]
