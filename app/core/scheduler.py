@@ -55,7 +55,10 @@ async def run_locked_job(
 def register_jobs() -> None:
     """스케줄 잡 등록 — 단일 scheduler 인스턴스에.
 
-    - 환율 09:00 KST (월~금) → 미장 close (KST 06:00) 후
+    스케줄:
+    - 환율 09:00 KST (월~금) → 미장 종목 갱신 09:10 (화~토) 직전 보장
+    - 미장 09:10 KST (화~토) → KST 06:00 미장 close 후 환율 갱신 직후
+    - 국장 16:10 KST (월~금) → 국장 close (16:00) 직후
     """
     # import 는 함수 내부 — 순환 의존 회피 (jobs 가 scheduler 모듈 의존)
     from app.core import jobs
@@ -66,4 +69,16 @@ def register_jobs() -> None:
         id="refresh_usd_krw",
         replace_existing=True,
     )
-    logger.info("스케줄 잡 등록 완료 (1개)")
+    scheduler.add_job(
+        jobs.refresh_us_prices_job,
+        CronTrigger(day_of_week="tue-sat", hour=9, minute=10, timezone=KST),
+        id="refresh_us_prices",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        jobs.refresh_kr_prices_job,
+        CronTrigger(day_of_week="mon-fri", hour=16, minute=10, timezone=KST),
+        id="refresh_kr_prices",
+        replace_existing=True,
+    )
+    logger.info("스케줄 잡 등록 완료 (3개)")

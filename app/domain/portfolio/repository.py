@@ -2,11 +2,11 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
-from app.domain.portfolio.enum import PortfolioTxType
+from app.domain.portfolio.enum import Market, PortfolioTxType
 from app.domain.portfolio.model import (
     PortfolioItem,
     PortfolioTransaction,
@@ -55,15 +55,15 @@ class PortfolioItemRepository:
         )
         return list(result.scalars().all())
 
-    async def find_active_by_account_country_code(
-        self, account_id: UUID, country: str, code: str,
+    async def find_active_by_account_market_code(
+        self, account_id: UUID, market: str, code: str,
     ) -> PortfolioItem | None:
-        """누적 매수 시 같은 종목 있는지 확인 — (account, country, code) 기준"""
+        """누적 매수 시 같은 종목 있는지 확인 — (account, market, code) 기준"""
         result = await self.db.execute(
             select(PortfolioItem).where(
                 and_(
                     PortfolioItem.account_id == account_id,
-                    PortfolioItem.country == country,
+                    PortfolioItem.market == market,
                     PortfolioItem.code == code,
                     PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
                 )
@@ -95,6 +95,47 @@ class PortfolioItemRepository:
     async def save(self, item: PortfolioItem) -> None:
         self.db.add(item)
         await self.db.flush()
+
+    async def find_active_distinct_code_market_by_markets(
+        self, markets: list[Market],
+    ) -> list[tuple[str, Market]]:
+        """전 가계부 통틀어 (code, market) DISTINCT 추출 — 시세 갱신 야후 호출 단위.
+        is_archived 종목은 제외 (보관된 종목 시세 갱신 불필요)."""
+        result = await self.db.execute(
+            select(PortfolioItem.code, PortfolioItem.market)
+            .where(
+                and_(
+                    PortfolioItem.market.in_([m.value for m in markets]),
+                    PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
+                    PortfolioItem.is_archived.is_(False),
+                )
+            )
+            .distinct()
+        )
+        return [(code, Market(market)) for code, market in result.all()]
+
+    async def bulk_update_current_price_by_code_market(
+        self, prices: dict[tuple[str, Market], Decimal],
+    ) -> int:
+        """매치되는 모든 active row 의 current_price 일괄 update.
+        반환: 총 영향받은 row 수."""
+        if not prices:
+            return 0
+        total = 0
+        for (code, market), price in prices.items():
+            result = await self.db.execute(
+                update(PortfolioItem)
+                .where(
+                    and_(
+                        PortfolioItem.code == code,
+                        PortfolioItem.market == market.value,
+                        PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
+                    )
+                )
+                .values(current_price=price)
+            )
+            total += result.rowcount or 0
+        return total
 
 
 class PortfolioTransactionRepository:

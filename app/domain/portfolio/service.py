@@ -10,7 +10,7 @@ from app.core.exceptions import CustomException, ErrorCode
 from app.domain.account.enum import AccountType
 from app.domain.account.repository import AccountRepository
 from app.domain.household.model import Household
-from app.domain.portfolio.enum import Country, PortfolioTxType
+from app.domain.portfolio.enum import Market, PortfolioTxType
 from app.domain.portfolio.model import (
     PortfolioItem,
     PortfolioTransaction,
@@ -51,7 +51,7 @@ def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse
         account_name=account.name if account else "(삭제됨)",
         name=item.name,
         code=item.code,
-        country=Country(item.country),
+        market=Market(item.market),
         quantity=item.quantity,
         avg_price=item.avg_price,
         current_price=item.current_price,
@@ -71,7 +71,7 @@ def _build_tx_response(tx: PortfolioTransaction, account_map: dict) -> Portfolio
         account_name=account.name if account else "(삭제됨)",
         name=tx.name,
         code=tx.code,
-        country=Country(tx.country),
+        market=Market(tx.market),
         pt_type=tx.pt_type,
         quantity=tx.quantity,
         price=tx.price,
@@ -96,11 +96,11 @@ async def _validate_investment_account(
     return a
 
 
-async def lookup_stock(country: Country, code: str) -> PortfolioLookupResponse:
+async def lookup_stock(market: Market, code: str) -> PortfolioLookupResponse:
     """야후 파이낸스로 종목명 + 현재가 조회 — 폼 자동 채움용"""
-    name, price, yahoo_symbol = await yahoo_lookup(country, code)
+    name, price, yahoo_symbol = await yahoo_lookup(market, code)
     return PortfolioLookupResponse(
-        country=country,
+        market=market,
         code=code.strip(),
         name=name,
         current_price=price,
@@ -137,7 +137,7 @@ async def create_portfolio(
         account_id=req.account_id,
         name=req.name.strip(),
         code=req.code.strip(),
-        country=req.country.value,
+        market=req.market.value,
         quantity=Decimal("0.0000"),
         avg_price=Decimal("0.00"),
         current_price=req.current_price,
@@ -146,8 +146,8 @@ async def create_portfolio(
     )
     await PortfolioItemRepository(db).save(item)
     logger.info(
-        "종목 등록 (account_id=%s, country=%s, code=%s, name=%s, current_price=%s)",
-        req.account_id, item.country, item.code, item.name, req.current_price,
+        "종목 등록 (account_id=%s, market=%s, code=%s, name=%s, current_price=%s)",
+        req.account_id, item.market, item.code, item.name, req.current_price,
     )
 
     accounts = await AccountRepository(db).find_by_ids([item.account_id])
@@ -172,7 +172,7 @@ async def buy(
         portfolio_item_id=item.id,
         name=item.name,
         code=item.code,
-        country=item.country,
+        market=item.market,
         pt_type=PortfolioTxType.BUY,
         quantity=req.quantity,
         price=req.price,
@@ -216,8 +216,8 @@ async def update_portfolio(
         item.name = req.name.strip()
     if req.code is not None:
         item.code = req.code.strip()
-    if req.country is not None:
-        item.country = req.country.value
+    if req.market is not None:
+        item.market = req.market.value
     if req.is_archived is not None:
         item.is_archived = req.is_archived
 
@@ -248,7 +248,7 @@ async def sell(
         portfolio_item_id=item.id,
         name=item.name,
         code=item.code,
-        country=item.country,
+        market=item.market,
         pt_type=PortfolioTxType.SELL,
         quantity=req.quantity,
         price=req.sell_price,
@@ -469,7 +469,7 @@ async def get_value_history_by_account(
             account_id=account_id,
             name=item_map[item_id].name if item_id in item_map else "(삭제됨)",
             code=item_map[item_id].code if item_id in item_map else "",
-            country=Country(item_map[item_id].country) if item_id in item_map else Country.KR,
+            market=Market(item_map[item_id].market) if item_id in item_map else Market.KRX_KOSPI,
             history=[_to_history_point(p) for p in points],
         )
         for item_id, points in grouped.items()
@@ -499,6 +499,6 @@ async def get_value_history_by_item(
         account_id=item.account_id,
         name=item.name,
         code=item.code,
-        country=Country(item.country),
+        market=Market(item.market),
         history=[_to_history_point(r) for r in rows],
     )

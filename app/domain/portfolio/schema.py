@@ -6,7 +6,7 @@ from pydantic import BaseModel, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.types import Money, Quantity, Rate
-from app.domain.portfolio.enum import Country, PortfolioTxType
+from app.domain.portfolio.enum import Market, PortfolioTxType
 
 
 class PortfolioCreateRequest(BaseModel):
@@ -14,7 +14,7 @@ class PortfolioCreateRequest(BaseModel):
 
     name: str
     code: str
-    country: Country
+    market: Market
     current_price: Decimal
     account_id: UUID
 
@@ -32,7 +32,7 @@ class PortfolioCreateRequest(BaseModel):
 class PortfolioLookupResponse(BaseModel):
     """야후 파이낸스 종목 조회 결과 — 폼 자동 채움용"""
 
-    country: Country
+    market: Market
     code: str
     name: str
     current_price: Money
@@ -62,7 +62,7 @@ class PortfolioUpdateRequest(BaseModel):
     current_price: Decimal | None = None
     name: str | None = None
     code: str | None = None
-    country: Country | None = None
+    market: Market | None = None
     is_archived: bool | None = None
 
     @model_validator(mode="after")
@@ -118,7 +118,7 @@ class PortfolioResponse(BaseModel):
     account_name: str
     name: str
     code: str
-    country: Country
+    market: Market
     quantity: Quantity
     avg_price: Money
     current_price: Money
@@ -137,7 +137,7 @@ class PortfolioTxResponse(BaseModel):
     account_name: str
     name: str
     code: str
-    country: Country
+    market: Market
     pt_type: PortfolioTxType
     quantity: Quantity
     price: Money
@@ -164,5 +164,5 @@ class PortfolioValueHistoryByItem(BaseModel):
     account_id: UUID
     name: str
     code: str
-    country: Country
+    market: Market
     history: list[PortfolioValueHistoryPoint]

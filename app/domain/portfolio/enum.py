@@ -8,8 +8,29 @@ class PortfolioTxType(StrEnum):
     SELL = "SELL"
 
 
-class Country(StrEnum):
-    """종목 소속 국가 — 야후 파이낸스 심볼 조합 기준"""
+class Market(StrEnum):
+    """종목 시장 — Yahoo 심볼 접미사 1:1 매핑.
 
-    KR = "KR"
-    US = "US"
+    KRX_KOSPI/KRX_KOSDAQ 은 한국, NASDAQ/NYSE 는 미국.
+    USD 환산 분기 등은 country_code 프로퍼티로 도출.
+    """
+
+    KRX_KOSPI = "KRX_KOSPI"
+    KRX_KOSDAQ = "KRX_KOSDAQ"
+    NASDAQ = "NASDAQ"
+    NYSE = "NYSE"
+
+    @property
+    def yahoo_suffix(self) -> str:
+        """Yahoo ticker 접미사. 미국은 빈 문자열."""
+        return {
+            Market.KRX_KOSPI: ".KS",
+            Market.KRX_KOSDAQ: ".KQ",
+            Market.NASDAQ: "",
+            Market.NYSE: "",
+        }[self]
+
+    @property
+    def country_code(self) -> str:
+        """그룹핑/표시용 — KR or US 도출."""
+        return "KR" if self in (Market.KRX_KOSPI, Market.KRX_KOSDAQ) else "US"
