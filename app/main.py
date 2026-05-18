@@ -9,6 +9,7 @@ from app.core.database import close_db, init_db
 from app.core.exceptions.handlers import register_exception_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import AccessLogMiddleware
+from app.core.scheduler import register_jobs, scheduler
 from app.domain.account.router import router as account_router
 from app.domain.account_snapshot.router import router as account_snapshot_router
 from app.domain.auth.router import router as auth_router
@@ -29,7 +30,10 @@ setup_logging()
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """앱 시작/종료 시 실행되는 라이프사이클 관리"""
     await init_db()
+    register_jobs()
+    scheduler.start()
     yield
+    scheduler.shutdown(wait=True)
     await close_db()
 
 

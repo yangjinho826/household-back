@@ -15,6 +15,7 @@ from app.domain.account.model import Account  # noqa: F401
 from app.domain.account_snapshot.model import AccountSnapshot  # noqa: F401
 from app.domain.auth.model import RefreshToken  # noqa: F401
 from app.domain.category.model import Category  # noqa: F401
+from app.domain.exchange_rate.model import CurrencyRate  # noqa: F401
 from app.domain.fixed.model import FixedExpense  # noqa: F401
 from app.domain.household.model import Household, HouseholdMember  # noqa: F401
 from app.domain.portfolio.model import (  # noqa: F401
