@@ -97,7 +97,10 @@ async def _validate_investment_account(
 
 
 async def lookup_stock(market: Market, code: str) -> PortfolioLookupResponse:
-    """야후 파이낸스로 종목명 + 현재가 조회 — 폼 자동 채움용"""
+    """야후 파이낸스로 종목명 + 현재가 조회 — 폼 자동 채움용.
+    OTHER 는 야후 미지원 — frontend 에서 조회 버튼 숨기지만 방어용으로 거부."""
+    if market == Market.OTHER:
+        raise CustomException(ErrorCode.STOCK_LOOKUP_FAILED)
     name, price, yahoo_symbol = await yahoo_lookup(market, code)
     return PortfolioLookupResponse(
         market=market,

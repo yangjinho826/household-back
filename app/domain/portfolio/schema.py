@@ -13,7 +13,7 @@ class PortfolioCreateRequest(BaseModel):
     """종목 등록 — 메타만 (수량/매수가는 매수 액션에서)"""
 
     name: str
-    code: str
+    code: str = ""
     market: Market
     current_price: Decimal
     account_id: UUID
@@ -22,8 +22,10 @@ class PortfolioCreateRequest(BaseModel):
     def _validate(self) -> "PortfolioCreateRequest":
         if not (1 <= len(self.name.strip()) <= 100):
             raise CustomException(ErrorCode.BAD_REQUEST)
-        if not (1 <= len(self.code.strip()) <= 50):
-            raise CustomException(ErrorCode.BAD_REQUEST)
+        # OTHER (야후 미지원) 면 code 빈문자열 허용, 그 외엔 1~50 필수
+        if self.market != Market.OTHER:
+            if not (1 <= len(self.code.strip()) <= 50):
+                raise CustomException(ErrorCode.BAD_REQUEST)
         if self.current_price <= 0:
             raise CustomException(ErrorCode.BAD_REQUEST)
         return self
@@ -71,7 +73,8 @@ class PortfolioUpdateRequest(BaseModel):
             raise CustomException(ErrorCode.BAD_REQUEST)
         if self.name is not None and not (1 <= len(self.name.strip()) <= 100):
             raise CustomException(ErrorCode.BAD_REQUEST)
-        if self.code is not None and not (1 <= len(self.code.strip()) <= 50):
+        # OTHER 종목 수정 케이스 대비 — code 빈문자열 허용, max 50 만 강제
+        if self.code is not None and len(self.code.strip()) > 50:
             raise CustomException(ErrorCode.BAD_REQUEST)
         return self
 
