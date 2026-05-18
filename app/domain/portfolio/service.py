@@ -1,6 +1,6 @@
 import logging
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +9,8 @@ from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
 from app.domain.account.enum import AccountType
 from app.domain.account.repository import AccountRepository
+from app.domain.exchange_rate.enum import CurrencyCode
+from app.domain.exchange_rate.repository import CurrencyRateRepository
 from app.domain.household.model import Household
 from app.domain.portfolio.enum import Market, PortfolioTxType
 from app.domain.portfolio.model import (
@@ -36,6 +38,9 @@ from app.domain.portfolio.schema import (
 from app.domain.portfolio.yahoo import lookup as yahoo_lookup
 
 logger = logging.getLogger(__name__)
+
+# USD 시장 — lookup 시 환율 적용해 KRW 환산 (market_price/service.py 와 동일 사상)
+_USD_MARKETS = frozenset({Market.NASDAQ, Market.NYSE})
 
 
 def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse:
@@ -96,12 +101,28 @@ async def _validate_investment_account(
     return a
 
 
-async def lookup_stock(market: Market, code: str) -> PortfolioLookupResponse:
+async def lookup_stock(
+    db: AsyncSession, market: Market, code: str,
+) -> PortfolioLookupResponse:
     """야후 파이낸스로 종목명 + 현재가 조회 — 폼 자동 채움용.
+    USD 시장(NASDAQ/NYSE) 은 환율 적용해 KRW 환산 — DB current_price 는 항상 KRW.
+    환율 미존재 시 lookup 실패 (평일 09:00 환율 갱신 잡 선행 필요).
     OTHER 는 야후 미지원 — frontend 에서 조회 버튼 숨기지만 방어용으로 거부."""
     if market == Market.OTHER:
         raise CustomException(ErrorCode.STOCK_LOOKUP_FAILED)
     name, price, yahoo_symbol = await yahoo_lookup(market, code)
+
+    if market in _USD_MARKETS:
+        fx = await CurrencyRateRepository(db).find_by_pair(
+            CurrencyCode.USD, CurrencyCode.KRW,
+        )
+        if fx is None:
+            logger.error(
+                "환율 없음 — USD 종목 lookup 실패 (market=%s, code=%s)", market, code,
+            )
+            raise CustomException(ErrorCode.STOCK_LOOKUP_FAILED)
+        price = (price * fx.rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
     return PortfolioLookupResponse(
         market=market,
         code=code.strip(),

@@ -29,9 +29,11 @@ async def lookup_stock(
     household: CurrentHousehold,  # 인증만 — 결과는 가계부와 무관한 공개 정보
     market: Market = Query(...),
     code: str = Query(..., min_length=1, max_length=50),
+    db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[PortfolioLookupResponse]:
-    """야후 파이낸스로 종목명 + 현재가 조회 — 폼 자동 채움용 (저장 X)"""
-    response = await service.lookup_stock(market, code)
+    """야후 파이낸스로 종목명 + 현재가 조회 — 폼 자동 채움용 (저장 X).
+    USD 시장은 KRW 로 환산해 응답."""
+    response = await service.lookup_stock(db, market, code)
     return ApiResponse.ok(data=response)
 
 
