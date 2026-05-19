@@ -2,9 +2,10 @@ import re
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.schema import CamelBaseModel
 
 _EMAIL_RE = re.compile(r"^[\w\.\-]+@[\w\.\-]+\.\w+$")
 _LETTER_RE = re.compile(r"[A-Za-z]")
@@ -28,7 +29,7 @@ def _check_name(name: str) -> None:
         raise CustomException(ErrorCode.INVALID_NAME)
 
 
-class UserCreateRequest(BaseModel):
+class UserCreateRequest(CamelBaseModel):
     email: str
     name: str
     password: str
@@ -42,7 +43,7 @@ class UserCreateRequest(BaseModel):
         return self
 
 
-class UserUpdateRequest(BaseModel):
+class UserUpdateRequest(CamelBaseModel):
     name: str | None = None
     password: str | None = None
     language: Literal["ko", "en"] | None = None
@@ -56,10 +57,8 @@ class UserUpdateRequest(BaseModel):
         return self
 
 
-class UserResponse(BaseModel):
+class UserResponse(CamelBaseModel):
     id: UUID
     email: str
     name: str
     language: str
-
-    model_config = {"from_attributes": True}

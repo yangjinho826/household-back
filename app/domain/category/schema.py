@@ -1,12 +1,13 @@
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.schema import CamelBaseModel
 from app.domain.category.enum import CategoryKind
 
 
-class CategoryCreateRequest(BaseModel):
+class CategoryCreateRequest(CamelBaseModel):
     kind: CategoryKind
     name: str
     color: str | None = None
@@ -22,7 +23,7 @@ class CategoryCreateRequest(BaseModel):
         return self
 
 
-class CategoryUpdateRequest(BaseModel):
+class CategoryUpdateRequest(CamelBaseModel):
     kind: CategoryKind | None = None
     name: str | None = None
     color: str | None = None
@@ -39,7 +40,7 @@ class CategoryUpdateRequest(BaseModel):
         return self
 
 
-class CategoryResponse(BaseModel):
+class CategoryResponse(CamelBaseModel):
     id: UUID
     household_id: UUID
     kind: CategoryKind
@@ -48,5 +49,3 @@ class CategoryResponse(BaseModel):
     icon: str | None
     sort_order: int
     is_archived: bool
-
-    model_config = {"from_attributes": True}
