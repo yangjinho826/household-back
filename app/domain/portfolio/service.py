@@ -1,3 +1,14 @@
+"""Portfolio 도메인 CRUD 비즈니스 로직.
+
+책임:
+- 종목(PortfolioItem) 등록/조회/수정/소프트 삭제
+- 매수/매도 액션 — qty 누적 + avg_price 재계산 + PortfolioTransaction 이력
+- 야후 파이낸스 종목 조회 (저장 전 폼 자동 채움)
+- PNL 계산 (cost / valuation / profit_loss / profit_loss_rate)
+
+월별 박제(PortfolioValueHistory) 는 별도 모듈 — `snapshot_service.py` 참조.
+"""
+
 import logging
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
