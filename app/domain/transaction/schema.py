@@ -2,14 +2,15 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.schema import CamelBaseModel
 from app.core.types import Money
 from app.domain.transaction.enum import TxType
 
 
-class TransactionCreateRequest(BaseModel):
+class TransactionCreateRequest(CamelBaseModel):
     tx_type: TxType
     amount: Decimal
     tx_date: date
@@ -46,7 +47,7 @@ class TransactionCreateRequest(BaseModel):
         return self
 
 
-class TransactionUpdateRequest(BaseModel):
+class TransactionUpdateRequest(CamelBaseModel):
     tx_type: TxType | None = None
     amount: Decimal | None = None
     tx_date: date | None = None
@@ -70,7 +71,7 @@ class TransactionUpdateRequest(BaseModel):
         return self
 
 
-class TransactionResponse(BaseModel):
+class TransactionResponse(CamelBaseModel):
     id: UUID
     household_id: UUID
     tx_type: TxType
@@ -89,14 +90,21 @@ class TransactionResponse(BaseModel):
     memo: str | None
 
 
-class TransactionListResponse(BaseModel):
+class TransactionListResponse(CamelBaseModel):
+    """거래 목록 — 커서 기반 페이징.
+
+    다른 도메인은 단순 list[Response] 를 반환 (전체 조회 + 프론트에서 wrap).
+    transaction 만 데이터량이 많아 커서 페이징 적용.
+    프론트는 nextCursor 가 null 아닐 때까지 추가 fetch.
+    """
+
     items: list[TransactionResponse]
     next_cursor: str | None
     has_next: bool
     total_count: int
 
 
-class CalendarDay(BaseModel):
+class CalendarDay(CamelBaseModel):
     date: date
     income: Money
     expense: Money
@@ -104,7 +112,7 @@ class CalendarDay(BaseModel):
     count: int
 
 
-class CalendarResponse(BaseModel):
+class CalendarResponse(CamelBaseModel):
     year: int
     month: int
     monthly_income: Money

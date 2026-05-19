@@ -1,14 +1,15 @@
 import re
 
-from pydantic import BaseModel, model_validator
+from pydantic import model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.schema import CamelBaseModel
 from app.domain.user.schema import UserResponse
 
 _EMAIL_RE = re.compile(r"^[\w\.\-]+@[\w\.\-]+\.\w+$")
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(CamelBaseModel):
     email: str
     password: str
 
@@ -21,13 +22,13 @@ class LoginRequest(BaseModel):
         return self
 
 
-class TokenResponse(BaseModel):
+class TokenResponse(CamelBaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
     user: UserResponse
 
 
-class RefreshResponse(BaseModel):
+class RefreshResponse(CamelBaseModel):
     access_token: str
     expires_in: int

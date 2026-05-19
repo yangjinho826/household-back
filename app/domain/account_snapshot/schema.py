@@ -1,12 +1,11 @@
 from datetime import date
 from uuid import UUID
 
-from pydantic import BaseModel
-
+from app.core.schema import CamelBaseModel
 from app.core.types import Money
 
 
-class SnapshotMonthBalance(BaseModel):
+class SnapshotMonthBalance(CamelBaseModel):
     account_id: UUID
     account_name: str
     balance: Money
@@ -15,7 +14,7 @@ class SnapshotMonthBalance(BaseModel):
     monthly_fixed_expense: Money
 
 
-class SnapshotMonth(BaseModel):
+class SnapshotMonth(CamelBaseModel):
     snapshot_date: date
     total_balance: Money
     total_income: Money
@@ -24,7 +23,7 @@ class SnapshotMonth(BaseModel):
     accounts: list[SnapshotMonthBalance]
 
 
-class SnapshotYearlyResponse(BaseModel):
+class SnapshotYearlyResponse(CamelBaseModel):
     months: list[SnapshotMonth]
     target_month_saved: bool
     target_month_date: date

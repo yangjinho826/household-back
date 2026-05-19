@@ -1,13 +1,14 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.schema import CamelBaseModel
 from app.domain.household.enum import HouseholdRole
 
 
-class HouseholdCreateRequest(BaseModel):
+class HouseholdCreateRequest(CamelBaseModel):
     name: str
     description: str | None = None
     currency: str = "KRW"
@@ -22,7 +23,7 @@ class HouseholdCreateRequest(BaseModel):
         return self
 
 
-class HouseholdUpdateRequest(BaseModel):
+class HouseholdUpdateRequest(CamelBaseModel):
     name: str | None = None
     description: str | None = None
     currency: str | None = None
@@ -37,7 +38,7 @@ class HouseholdUpdateRequest(BaseModel):
         return self
 
 
-class HouseholdResponse(BaseModel):
+class HouseholdResponse(CamelBaseModel):
     id: UUID
     name: str
     description: str | None
@@ -46,10 +47,9 @@ class HouseholdResponse(BaseModel):
     started_at: date
     role: HouseholdRole
 
-    model_config = {"from_attributes": True}
 
 
-class HouseholdMemberResponse(BaseModel):
+class HouseholdMemberResponse(CamelBaseModel):
     id: UUID
     household_id: UUID
     user_id: UUID
@@ -58,10 +58,9 @@ class HouseholdMemberResponse(BaseModel):
     role: HouseholdRole
     joined_at: datetime
 
-    model_config = {"from_attributes": True}
 
 
-class HouseholdMemberCreateRequest(BaseModel):
+class HouseholdMemberCreateRequest(CamelBaseModel):
     user_id: UUID
     role: HouseholdRole = HouseholdRole.MEMBER
 

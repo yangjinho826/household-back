@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.schema import CamelBaseModel
 from app.core.types import Money
 
 
@@ -15,7 +16,7 @@ def _check_common(name: str | None, day_of_month: int | None, color: str | None)
         raise CustomException(ErrorCode.BAD_REQUEST)
 
 
-class FixedCreateRequest(BaseModel):
+class FixedCreateRequest(CamelBaseModel):
     name: str
     day_of_month: int
     category_id: UUID | None = None
@@ -29,7 +30,7 @@ class FixedCreateRequest(BaseModel):
         return self
 
 
-class FixedUpdateRequest(BaseModel):
+class FixedUpdateRequest(CamelBaseModel):
     name: str | None = None
     day_of_month: int | None = None
     category_id: UUID | None = None
@@ -44,7 +45,7 @@ class FixedUpdateRequest(BaseModel):
         return self
 
 
-class FixedResponse(BaseModel):
+class FixedResponse(CamelBaseModel):
     id: UUID
     household_id: UUID
     name: str
@@ -59,11 +60,11 @@ class FixedResponse(BaseModel):
     is_archived: bool
 
 
-class FixedMonthlyUsage(BaseModel):
+class FixedMonthlyUsage(CamelBaseModel):
     fixed_expense_id: UUID
     used: Money
 
 
-class FixedMonthlySummaryResponse(BaseModel):
+class FixedMonthlySummaryResponse(CamelBaseModel):
     month: str  # YYYY-MM
     items: list[FixedMonthlyUsage]

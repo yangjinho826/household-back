@@ -2,14 +2,15 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.schema import CamelBaseModel
 from app.core.types import Money, Quantity, Rate
 from app.domain.portfolio.enum import Market, PortfolioTxType
 
 
-class PortfolioCreateRequest(BaseModel):
+class PortfolioCreateRequest(CamelBaseModel):
     """종목 등록 — 메타만 (수량/매수가는 매수 액션에서)"""
 
     name: str
@@ -31,7 +32,7 @@ class PortfolioCreateRequest(BaseModel):
         return self
 
 
-class PortfolioLookupResponse(BaseModel):
+class PortfolioLookupResponse(CamelBaseModel):
     """야후 파이낸스 종목 조회 결과 — 폼 자동 채움용"""
 
     market: Market
@@ -41,7 +42,7 @@ class PortfolioLookupResponse(BaseModel):
     yahoo_symbol: str
 
 
-class PortfolioBuyRequest(BaseModel):
+class PortfolioBuyRequest(CamelBaseModel):
     """매수 액션 — qty 누적 + avg_price 재계산 + 이력 기록"""
 
     quantity: Decimal
@@ -58,7 +59,7 @@ class PortfolioBuyRequest(BaseModel):
         return self
 
 
-class PortfolioUpdateRequest(BaseModel):
+class PortfolioUpdateRequest(CamelBaseModel):
     """평가액/메타 수정 (transaction 무관)"""
 
     current_price: Decimal | None = None
@@ -79,7 +80,7 @@ class PortfolioUpdateRequest(BaseModel):
         return self
 
 
-class PortfolioSellRequest(BaseModel):
+class PortfolioSellRequest(CamelBaseModel):
     """매도 요청 (부분/전량)"""
 
     quantity: Decimal
@@ -96,7 +97,7 @@ class PortfolioSellRequest(BaseModel):
         return self
 
 
-class PortfolioTxUpdateRequest(BaseModel):
+class PortfolioTxUpdateRequest(CamelBaseModel):
     """거래 내역 수정 — pt_type 은 변경 불가 (매수↔매도 전환은 별도 거래로)"""
 
     quantity: Decimal | None = None
@@ -113,7 +114,7 @@ class PortfolioTxUpdateRequest(BaseModel):
         return self
 
 
-class PortfolioResponse(BaseModel):
+class PortfolioResponse(CamelBaseModel):
     """보유 종목 응답 (PNL 포함)"""
 
     id: UUID
@@ -132,7 +133,7 @@ class PortfolioResponse(BaseModel):
     is_archived: bool
 
 
-class PortfolioTxResponse(BaseModel):
+class PortfolioTxResponse(CamelBaseModel):
     """매수/매도 이력 응답"""
 
     id: UUID
@@ -149,7 +150,7 @@ class PortfolioTxResponse(BaseModel):
     memo: str | None
 
 
-class PortfolioValueHistoryPoint(BaseModel):
+class PortfolioValueHistoryPoint(CamelBaseModel):
     """월별 박제 데이터 1건"""
 
     snapshot_date: date
@@ -160,7 +161,7 @@ class PortfolioValueHistoryPoint(BaseModel):
     valuation: Money
 
 
-class PortfolioValueHistoryByItem(BaseModel):
+class PortfolioValueHistoryByItem(CamelBaseModel):
     """종목별 그루핑 — 차트의 라인 1개에 해당"""
 
     portfolio_item_id: UUID

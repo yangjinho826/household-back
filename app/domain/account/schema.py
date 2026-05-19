@@ -1,14 +1,15 @@
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.schema import CamelBaseModel
 from app.core.types import Money, Rate
 from app.domain.account.enum import AccountType
 
 
-class AccountCreateRequest(BaseModel):
+class AccountCreateRequest(CamelBaseModel):
     name: str
     account_type: AccountType
     start_balance: Decimal = Decimal("0")
@@ -25,7 +26,7 @@ class AccountCreateRequest(BaseModel):
         return self
 
 
-class AccountUpdateRequest(BaseModel):
+class AccountUpdateRequest(CamelBaseModel):
     name: str | None = None
     account_type: AccountType | None = None
     start_balance: Decimal | None = None
@@ -43,7 +44,7 @@ class AccountUpdateRequest(BaseModel):
         return self
 
 
-class AccountResponse(BaseModel):
+class AccountResponse(CamelBaseModel):
     id: UUID
     household_id: UUID
     name: str
@@ -61,5 +62,3 @@ class AccountResponse(BaseModel):
     portfolio_valuation: Money | None = None
     portfolio_profit_loss: Money | None = None
     portfolio_profit_loss_rate: Rate | None = None
-
-    model_config = {"from_attributes": True}
