@@ -1,11 +1,11 @@
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel
+from app.core.schema import CamelBaseModel
 
 T = TypeVar("T")
 
 
-class ApiResponse(BaseModel, Generic[T]):
+class ApiResponse(CamelBaseModel, Generic[T]):
     """통일 API 응답 스키마"""
 
     status: int
