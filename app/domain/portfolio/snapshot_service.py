@@ -1,3 +1,12 @@
+"""Portfolio 월별 박제(PortfolioValueHistory) 전용 로직.
+
+책임:
+- 자산 스냅샷 시점의 모든 INVESTMENT 통장 종목 상태를 1행씩 기록
+- 가격/수량/평가액을 그 시점 그대로 보존 (차트의 라인 1개)
+
+호출처: `account_snapshot/service.py` 의 `create_target_month_snapshot` — 매월 박제 시 같이 실행.
+"""
+
 import logging
 from datetime import date
 
