@@ -2,8 +2,8 @@ name: Deploy to Lightsail
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    tags: ['v*']        # v 로 시작하는 git tag push 시만 트리거 (의식적 배포)
+  workflow_dispatch:    # 비상용 수동 트리거는 유지
 
 env:
   IMAGE_NAME: household-back
@@ -45,6 +45,30 @@ jobs:
         run: |
           docker push ${{ env.GHCR_REPOSITORY }}:${{ env.IMAGE_TAG }}
           docker push ${{ env.GHCR_REPOSITORY }}:latest
+
+      # 배포 직전 DB 스냅샷을 R2 의 pre-deploy/ 에 업로드 (14일 retention).
+      # 이 스텝이 실패하면 set -e 로 워크플로우 중단 → 백업 없이 배포되는 일 방지.
+      - name: Pre-deploy DB snapshot to R2
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          envs: IMAGE_TAG
+          script: |
+            set -e
+            cd ~/household/household-back
+            set -a; . ./.env; set +a
+            DUMP=/tmp/pre-deploy-${IMAGE_TAG}.sql.gz
+            docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+              --format=plain --no-owner --no-privileges \
+              | gzip > "$DUMP"
+            rclone copy "$DUMP" "r2:${R2_BUCKET}/pre-deploy/" --progress
+            rclone delete "r2:${R2_BUCKET}/pre-deploy/" --min-age 14d
+            rm -f "$DUMP"
+            echo "▶ pre-deploy snapshot: r2:${R2_BUCKET}/pre-deploy/pre-deploy-${IMAGE_TAG}.sql.gz"
 
       - name: Deploy to Lightsail via SSH
         uses: appleboy/ssh-action@v1.0.3

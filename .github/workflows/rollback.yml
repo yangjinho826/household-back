@@ -1,0 +1,77 @@
+name: Rollback (직전 이미지로 + incident DB snapshot)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  IMAGE_NAME: household-back
+  GHCR_REPOSITORY: ghcr.io/yangjinho826/household-back
+
+jobs:
+  rollback:
+    name: Rollback to previous image (+ incident DB snapshot)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Find previous timestamp tag from GHCR
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # GHCR 의 패키지 version 목록 → 모든 tag 추출 →
+          # timestamp-sha 형식만 필터 → 내림차순 정렬 → 2번째 (현재 :latest 의 직전)
+          PREV=$(gh api -X GET /users/yangjinho826/packages/container/household-back/versions --paginate \
+            --jq '.[].metadata.container.tags[]' \
+            | grep -E '^[0-9]{14}-[a-f0-9]{8}$' \
+            | sort -ru \
+            | sed -n '2p')
+
+          if [ -z "$PREV" ]; then
+            echo "::error::직전 timestamp 태그를 찾지 못함. 수동 SSH 롤백 필요."
+            exit 1
+          fi
+
+          echo "PREV_TAG=$PREV" >> "$GITHUB_OUTPUT"
+          echo "▶ 직전 태그: $PREV"
+
+      - name: Rollback via SSH (incident snapshot + image only)
+        id: ssh
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          PREV_TAG: ${{ steps.tag.outputs.PREV_TAG }}
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          envs: PREV_TAG
+          script: |
+            set -e
+            cd ~/household/household-back
+            set -a; . ./.env; set +a
+            STAMP=$(date +'%Y%m%d%H%M%S')
+
+            # 1) incident snapshot — 사고 시점 DB 보존 (개발자가 수동 복원/머지 시 필요)
+            INC=/tmp/pre-rollback-${STAMP}.sql.gz
+            docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+              --format=plain --no-owner --no-privileges | gzip > "$INC"
+            rclone copy "$INC" "r2:${R2_BUCKET}/pre-rollback/" --progress
+            rclone delete "r2:${R2_BUCKET}/pre-rollback/" --min-age 14d
+            rm -f "$INC"
+            echo "▶ incident snapshot: r2:${R2_BUCKET}/pre-rollback/pre-rollback-${STAMP}.sql.gz"
+
+            # 2) 옛 이미지 pull + 호스트 :latest 재매핑 + 컨테이너 재기동
+            docker pull ${{ env.GHCR_REPOSITORY }}:${PREV_TAG}
+            docker tag  ${{ env.GHCR_REPOSITORY }}:${PREV_TAG} ${{ env.IMAGE_NAME }}:latest
+            docker compose up -d --no-deps app
+            docker compose ps
+
+      - name: Notice
+        run: |
+          echo "✅ Image rolled back to ${{ steps.tag.outputs.PREV_TAG }}"
+          echo "⚠  DB 는 자동 복원하지 않았음 — DDL 변경 동반된 사고면 SSH 로 수동 복원 필요"
+          echo "📦 incident snapshot 은 r2:.../pre-rollback/ 에 저장됨 (14일 보존)"
+          echo "📦 pre-deploy 백업 (복원 source) 은 r2:.../pre-deploy/ 에 있음"
