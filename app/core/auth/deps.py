@@ -25,7 +25,7 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Bearer 토큰에서 현재 로그인 유저를 조회"""
-    logger.info(credentials)
+    logger.debug(credentials)
     try:
         payload = decode_token(credentials.credentials)
     except ExpiredSignatureError:
