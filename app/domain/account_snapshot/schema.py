@@ -5,6 +5,13 @@ from app.core.schema import CamelBaseModel
 from app.core.types import Money
 
 
+class SnapshotYearlyQuery(CamelBaseModel):
+    """월별 자산 추이 조회 쿼리. CamelBaseModel 이라 fromDate/toDate 로 옴."""
+
+    from_date: date | None = None
+    to_date: date | None = None
+
+
 class SnapshotMonthBalance(CamelBaseModel):
     account_id: UUID
     account_name: str

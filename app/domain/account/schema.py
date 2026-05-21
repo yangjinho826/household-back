@@ -9,6 +9,14 @@ from app.core.types import Money, Rate
 from app.domain.account.enum import AccountType
 
 
+class AccountListQuery(CamelBaseModel):
+    """통장 목록 쿼리 파라미터."""
+
+    search_term: str | None = None
+    account_type: AccountType | None = None
+    is_archived: bool | None = None
+
+
 class AccountCreateRequest(CamelBaseModel):
     name: str
     account_type: AccountType

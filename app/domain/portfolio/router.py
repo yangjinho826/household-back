@@ -1,4 +1,4 @@
-from datetime import date
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -18,7 +18,9 @@ from app.domain.portfolio.schema import (
     PortfolioTxResponse,
     PortfolioTxUpdateRequest,
     PortfolioUpdateRequest,
+    PortfolioValueHistoryByAccountQuery,
     PortfolioValueHistoryByItem,
+    PortfolioValueHistoryByItemQuery,
 )
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -154,14 +156,12 @@ async def delete_portfolio(
 @router.get("/value-history")
 async def get_portfolio_value_history_by_account(
     household: CurrentHousehold,
-    account_id: UUID = Query(..., alias="accountId"),
-    from_date: date | None = Query(None, alias="from"),
-    to_date: date | None = Query(None, alias="to"),
+    q: Annotated[PortfolioValueHistoryByAccountQuery, Query()],
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[list[PortfolioValueHistoryByItem]]:
     """통장 단위 종목별 월별 평가액 추이 (차트용). 기본: 최근 12개월"""
     response = await service.get_value_history_by_account(
-        db, household, account_id, from_date, to_date,
+        db, household, q.account_id, q.from_date, q.to_date,
     )
     return ApiResponse.ok(data=response)
 
@@ -170,12 +170,11 @@ async def get_portfolio_value_history_by_account(
 async def get_portfolio_value_history_by_item(
     item_id: UUID,
     household: CurrentHousehold,
-    from_date: date | None = Query(None, alias="from"),
-    to_date: date | None = Query(None, alias="to"),
+    q: Annotated[PortfolioValueHistoryByItemQuery, Query()],
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[PortfolioValueHistoryByItem]:
     """특정 종목 월별 평가액 추이 (차트용)"""
     response = await service.get_value_history_by_item(
-        db, household, item_id, from_date, to_date,
+        db, household, item_id, q.from_date, q.to_date,
     )
     return ApiResponse.ok(data=response)
