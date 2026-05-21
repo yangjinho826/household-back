@@ -2,12 +2,24 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.schema import CamelBaseModel
 from app.core.types import Money
 from app.domain.transaction.enum import TxType
+
+
+class TransactionListQuery(CamelBaseModel):
+    """거래 목록 쿼리 파라미터. CamelBaseModel 이라 camelCase 자동 매핑."""
+
+    tx_type: TxType | None = None
+    account_id: UUID | None = None
+    category_id: UUID | None = None
+    year: int | None = Field(None, ge=2000, le=2100)
+    month: int | None = Field(None, ge=1, le=12)
+    from_date: date | None = None
+    to_date: date | None = None
 
 
 class TransactionCreateRequest(CamelBaseModel):
