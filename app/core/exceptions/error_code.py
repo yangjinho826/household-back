@@ -41,6 +41,11 @@ class ErrorCode(Enum):
     # 포트폴리오 (PT)
     STOCK_LOOKUP_FAILED = (404, "PT001", "종목 조회에 실패했습니다.")
 
+    # 멱등성 (ID)
+    IDEMPOTENCY_KEY_CONFLICT = (422, "ID001", "다른 요청에 사용된 키입니다.")
+    IDEMPOTENCY_BODY_MISMATCH = (422, "ID002", "같은 키로 다른 요청 본문이 왔습니다.")
+    IDEMPOTENCY_IN_PROGRESS = (409, "ID003", "동일 요청 처리 중입니다. 잠시 후 재시도해주세요.")
+
     def __init__(self, status: int, code: str, message: str) -> None:
         self.status = status
         self.code = code
