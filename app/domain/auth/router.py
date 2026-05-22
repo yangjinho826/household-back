@@ -62,7 +62,7 @@ async def login(
 async def refresh(
     db: AsyncSession = Depends(get_db),
     refresh_token: str | None = Cookie(None, alias=_REFRESH_COOKIE_KEY),
-):
+) -> ApiResponse[RefreshResponse]:
     """Refresh Token으로 새 Access Token 발급.
 
     실패 시 refresh_token 쿠키 삭제 — 클라가 redirect 후 다시 protected 페이지로
