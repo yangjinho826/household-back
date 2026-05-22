@@ -4,6 +4,7 @@
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.idempotency import service as idempotency_service
 from app.core.scheduler import run_locked_job
 from app.domain.exchange_rate import service as exchange_rate_service
 from app.domain.market_price import service as market_price_service
@@ -35,3 +36,8 @@ async def refresh_us_prices_job() -> None:
         )
 
     await run_locked_job("refresh_us_prices", _run)
+
+
+async def cleanup_idempotency_job() -> None:
+    """idempotency 레코드 만료 정리 — 매시간."""
+    await run_locked_job("cleanup_idempotency", idempotency_service.cleanup_expired)
