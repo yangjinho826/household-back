@@ -6,6 +6,10 @@ __pycache__/
 .idea/
 .claude/*
 !.claude/settings.json
+!.claude/memory-bank/
+!.claude/memory-bank/**
 .serena/
 logs/
 .dockerignore
+.env.claude
+.claude/memory-bank/_progress.log
