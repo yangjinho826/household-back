@@ -2,35 +2,32 @@
 
 스택: `ai-router-api`
 
+<!-- BEGIN claude-init managed: rules -->
 ## 적용 룰
 
-<!-- ~/.claude/rules/ 의 룰 파일들을 @import. claude-init 이 자동 생성 -->
+<!-- ~/.claude/rules/ 의 룰 파일들을 @import. claude-init 이 자동 생성/갱신 (마커 안만 갱신) -->
 
 <!-- common -->
-@~/.claude/rules/common/README.md
 @~/.claude/rules/common/coding.md
 @~/.claude/rules/common/git.md
 @~/.claude/rules/common/style.md
 
 <!-- python -->
-@~/.claude/rules/python/README.md
 @~/.claude/rules/python/style.md
 @~/.claude/rules/python/testing.md
 
 <!-- python-fastapi -->
-@~/.claude/rules/python-fastapi/README.md
 @~/.claude/rules/python-fastapi/general.md
 @~/.claude/rules/python-fastapi/sqlalchemy.md
 @~/.claude/rules/python-fastapi/testing.md
 
 <!-- cnnet -->
-@~/.claude/rules/cnnet/README.md
 @~/.claude/rules/cnnet/general.md
 
 <!-- ai-router-api -->
-@~/.claude/rules/ai-router-api/README.md
 @~/.claude/rules/ai-router-api/general.md
 
+<!-- END claude-init managed: rules -->
 ## 빌드/실행
 
 ```bash
