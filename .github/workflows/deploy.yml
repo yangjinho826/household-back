@@ -81,6 +81,17 @@ jobs:
             cd ~/household/household-back
             git pull origin main
             docker compose pull app
+
+            # compose 가 rename 도중 이탈해서 남은 stuck 컨테이너 정리.
+            # 이름이 정확히 'household-back' 인 정상 컨테이너는 건드리지 않고,
+            # 'xxx_household-back' 같은 prefix 붙은 것만 강제 제거.
+            stuck=$(docker ps -a --filter "name=household-back" --format '{{.ID}}\t{{.Names}}' \
+              | awk -F'\t' '$2 != "household-back" {print $1}')
+            if [ -n "$stuck" ]; then
+              echo "▶ stuck 컨테이너 정리: $stuck"
+              echo "$stuck" | xargs -r docker rm -f
+            fi
+
             docker compose up -d --remove-orphans
             docker image prune -af --filter "until=24h"
 
