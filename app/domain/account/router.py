@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -6,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.api_response import ApiResponse
 from app.core.database import get_db
 from app.domain.account import service
-from app.domain.account.enum import AccountType
 from app.domain.account.schema import (
     AccountCreateRequest,
+    AccountListQuery,
     AccountResponse,
     AccountUpdateRequest,
 )
@@ -20,17 +21,15 @@ router = APIRouter(prefix="/account", tags=["account"])
 @router.get("/list")
 async def list_accounts(
     household: CurrentHousehold,
-    search_term: str | None = Query(None, alias="searchTerm"),
-    account_type: AccountType | None = Query(None, alias="accountType"),
-    is_archived: bool | None = Query(None, alias="isArchived"),
+    q: Annotated[AccountListQuery, Query()],
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[list[AccountResponse]]:
     """통장 목록 — searchTerm/accountType/isArchived 필터"""
     response = await service.list_accounts(
         db, household,
-        search_term=search_term,
-        account_type=account_type.value if account_type else None,
-        is_archived=is_archived,
+        search_term=q.search_term,
+        account_type=q.account_type.value if q.account_type else None,
+        is_archived=q.is_archived,
     )
     return ApiResponse.ok(data=response)
 

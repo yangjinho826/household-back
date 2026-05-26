@@ -7,6 +7,14 @@ from app.core.schema import CamelBaseModel
 from app.domain.category.enum import CategoryKind
 
 
+class CategoryListQuery(CamelBaseModel):
+    """카테고리 목록 쿼리 파라미터."""
+
+    search_term: str | None = None
+    kind: CategoryKind | None = None
+    is_archived: bool | None = None
+
+
 class CategoryCreateRequest(CamelBaseModel):
     kind: CategoryKind
     name: str

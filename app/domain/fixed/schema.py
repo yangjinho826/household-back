@@ -7,6 +7,13 @@ from app.core.schema import CamelBaseModel
 from app.core.types import Money
 
 
+class FixedListQuery(CamelBaseModel):
+    """고정지출 목록 쿼리 파라미터."""
+
+    search_term: str | None = None
+    is_archived: bool | None = None
+
+
 def _check_common(name: str | None, day_of_month: int | None, color: str | None) -> None:
     if name is not None and not (1 <= len(name.strip()) <= 100):
         raise CustomException(ErrorCode.BAD_REQUEST)

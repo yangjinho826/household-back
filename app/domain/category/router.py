@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -6,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.api_response import ApiResponse
 from app.core.database import get_db
 from app.domain.category import service
-from app.domain.category.enum import CategoryKind
 from app.domain.category.schema import (
     CategoryCreateRequest,
+    CategoryListQuery,
     CategoryResponse,
     CategoryUpdateRequest,
 )
@@ -20,17 +21,15 @@ router = APIRouter(prefix="/category", tags=["category"])
 @router.get("/list")
 async def list_categories(
     household: CurrentHousehold,
-    search_term: str | None = Query(None, alias="searchTerm"),
-    kind: CategoryKind | None = Query(None),
-    is_archived: bool | None = Query(None, alias="isArchived"),
+    q: Annotated[CategoryListQuery, Query()],
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[list[CategoryResponse]]:
     """카테고리 목록 — searchTerm/kind/isArchived 필터"""
     response = await service.list_categories(
         db, household,
-        search_term=search_term,
-        kind=kind.value if kind else None,
-        is_archived=is_archived,
+        search_term=q.search_term,
+        kind=q.kind.value if q.kind else None,
+        is_archived=q.is_archived,
     )
     return ApiResponse.ok(data=response)
 

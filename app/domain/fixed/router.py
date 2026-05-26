@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -11,6 +12,7 @@ from app.core.exceptions import CustomException, ErrorCode
 from app.domain.fixed import service
 from app.domain.fixed.schema import (
     FixedCreateRequest,
+    FixedListQuery,
     FixedMonthlySummaryResponse,
     FixedResponse,
     FixedUpdateRequest,
@@ -23,15 +25,14 @@ router = APIRouter(prefix="/fixed", tags=["fixed"])
 @router.get("/list")
 async def list_fixed_expenses(
     household: CurrentHousehold,
-    search_term: str | None = Query(None, alias="searchTerm"),
-    is_archived: bool | None = Query(None, alias="isArchived"),
+    q: Annotated[FixedListQuery, Query()],
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[list[FixedResponse]]:
     """고정지출 목록 — searchTerm/isArchived 필터"""
     response = await service.list_fixed_expenses(
         db, household,
-        search_term=search_term,
-        is_archived=is_archived,
+        search_term=q.search_term,
+        is_archived=q.is_archived,
     )
     return ApiResponse.ok(data=response)
 

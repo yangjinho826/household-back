@@ -10,6 +10,21 @@ from app.core.types import Money, Quantity, Rate
 from app.domain.portfolio.enum import Market, PortfolioTxType
 
 
+class PortfolioValueHistoryByAccountQuery(CamelBaseModel):
+    """통장 단위 종목별 평가액 추이 쿼리. accountId 필수, 기간 옵션."""
+
+    account_id: UUID
+    from_date: date | None = None
+    to_date: date | None = None
+
+
+class PortfolioValueHistoryByItemQuery(CamelBaseModel):
+    """종목 단위 평가액 추이 쿼리. 기간 옵션."""
+
+    from_date: date | None = None
+    to_date: date | None = None
+
+
 class PortfolioCreateRequest(CamelBaseModel):
     """종목 등록 — 메타만 (수량/매수가는 매수 액션에서)"""
 
