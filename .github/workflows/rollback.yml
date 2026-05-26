@@ -66,6 +66,17 @@ jobs:
             # 2) 옛 이미지 pull + 호스트 :latest 재매핑 + 컨테이너 재기동
             docker pull ${{ env.GHCR_REPOSITORY }}:${PREV_TAG}
             docker tag  ${{ env.GHCR_REPOSITORY }}:${PREV_TAG} ${{ env.IMAGE_NAME }}:latest
+
+            # compose 가 rename 도중 이탈해서 남은 stuck 컨테이너 정리.
+            # 이름이 정확히 'household-back' 인 정상 컨테이너는 건드리지 않고,
+            # 'xxx_household-back' 같은 prefix 붙은 것만 강제 제거.
+            stuck=$(docker ps -a --filter "name=household-back" --format '{{.ID}}\t{{.Names}}' \
+              | awk -F'\t' '$2 != "household-back" {print $1}')
+            if [ -n "$stuck" ]; then
+              echo "▶ stuck 컨테이너 정리: $stuck"
+              echo "$stuck" | xargs -r docker rm -f
+            fi
+
             docker compose up -d --no-deps app
             docker compose ps
 
