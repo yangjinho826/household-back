@@ -49,6 +49,11 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         """요청 유효성 검사 예외 처리"""
         errors = exc.errors()
+        # 디버깅용: 어떤 필드/위치에서 검증 실패했는지 서버 로그에 노출.
+        # 운영에서도 유지 — 응답 message 는 일반화돼서 클라이언트에 노출되지 않음.
+        logger.warning(
+            "validation error on %s %s: %s", request.method, request.url.path, errors
+        )
         message = (
             errors[0].get("msg", "잘못된 요청입니다.") if errors else "잘못된 요청입니다."
         )

@@ -26,13 +26,12 @@ router = APIRouter(prefix="/transaction", tags=["transaction"])
 async def list_transactions(
     household: CurrentHousehold,
     q: Annotated[TransactionListQuery, Query()],
-    cursor: str | None = Query(None),
-    limit: int = Query(20, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[TransactionListResponse]:
     """거래 목록 (커서 기반 페이징)"""
-    f = TransactionFilter(**q.model_dump(exclude_none=True))
-    response = await service.list_transactions(db, household, f, cursor, limit)
+    filter_data = q.model_dump(exclude={"cursor", "limit"}, exclude_none=True)
+    f = TransactionFilter(**filter_data)
+    response = await service.list_transactions(db, household, f, q.cursor, q.limit)
     return ApiResponse.ok(data=response)
 
 

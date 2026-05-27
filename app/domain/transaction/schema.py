@@ -11,8 +11,16 @@ from app.domain.transaction.enum import TxType
 
 
 class TransactionListQuery(CamelBaseModel):
-    """거래 목록 쿼리 파라미터. CamelBaseModel 이라 camelCase 자동 매핑."""
+    """거래 목록 쿼리 파라미터. CamelBaseModel 이라 camelCase 자동 매핑.
 
+    cursor / limit 도 같은 모델 안에 두는 이유:
+    fastapi 의 Annotated[Model, Query()] 패턴은 같은 시그니처에 별도 Query 파라미터가
+    공존하면 모델 unwrap 을 못해 모델 자체를 단일 query 로 처리 → 400 발생.
+    페이징 파라미터까지 한 모델에 묶어 시그니처에 모델 1개만 남겨야 정상 분해됨.
+    """
+
+    cursor: str | None = None
+    limit: int = Field(20, ge=1, le=500)
     tx_type: TxType | None = None
     account_id: UUID | None = None
     category_id: UUID | None = None
