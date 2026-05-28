@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.schema import CamelBaseModel
@@ -8,8 +8,10 @@ from app.core.types import Money
 
 
 class FixedListQuery(CamelBaseModel):
-    """고정지출 목록 쿼리 파라미터."""
+    """고정지출 목록 쿼리 (cursor 무한 스크롤)."""
 
+    cursor: str | None = None
+    limit: int = Field(30, ge=1, le=200)
     search_term: str | None = None
     is_archived: bool | None = None
 

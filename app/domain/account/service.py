@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.pagination import CursorPage
 from app.domain.account.enum import AccountType
 from app.domain.account.model import Account
 from app.domain.account.repository import AccountRepository
@@ -106,6 +107,7 @@ async def list_accounts(
     account_type: str | None = None,
     is_archived: bool | None = None,
 ) -> list[AccountResponse]:
+    """내부용 — sort_order 정렬 유지 (portfolio overview / snapshot 에서 호출)."""
     repo = AccountRepository(db)
     tx_repo = TransactionRepository(db)
     accounts = await repo.search_by_household_id(
@@ -119,6 +121,55 @@ async def list_accounts(
         summary = await _calc_balance(tx_repo, a, db)
         responses.append(_build_response(a, summary))
     return responses
+
+
+async def list_accounts_cursor(
+    db: AsyncSession,
+    household: Household,
+    *,
+    search_term: str | None = None,
+    account_type: str | None = None,
+    is_archived: bool | None = None,
+    cursor: str | None = None,
+    limit: int = 30,
+) -> "CursorPage[AccountResponse]":
+    """관리 페이지용 — frst_reg_dt DESC 정렬, cursor 무한 스크롤."""
+    repo = AccountRepository(db)
+    tx_repo = TransactionRepository(db)
+    rows = await repo.list_by_cursor(
+        household.id,
+        search_term=search_term,
+        account_type=account_type,
+        is_archived=is_archived,
+        cursor=cursor,
+        limit=limit,
+    )
+    has_next = len(rows) > limit
+    rows = rows[:limit]
+
+    items: list[AccountResponse] = []
+    for a in rows:
+        summary = await _calc_balance(tx_repo, a, db)
+        items.append(_build_response(a, summary))
+
+    total_count = await repo.count_search(
+        household.id,
+        search_term=search_term,
+        account_type=account_type,
+        is_archived=is_archived,
+    )
+
+    next_cursor: str | None = None
+    if has_next and rows:
+        last = rows[-1]
+        next_cursor = f"{last.frst_reg_dt.isoformat()}|{last.id}"
+
+    return CursorPage(
+        items=items,
+        next_cursor=next_cursor,
+        has_next=has_next,
+        total_count=total_count,
+    )
 
 
 async def create_account(

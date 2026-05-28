@@ -9,7 +9,9 @@ from app.core.database import get_db
 from app.domain.household import service
 from app.domain.household.schema import (
     HouseholdCreateRequest,
+    HouseholdListResponse,
     HouseholdMemberCreateRequest,
+    HouseholdMemberListResponse,
     HouseholdMemberResponse,
     HouseholdResponse,
     HouseholdUpdateRequest,
@@ -22,8 +24,8 @@ router = APIRouter(prefix="/household", tags=["household"])
 async def list_households(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
-) -> ApiResponse[list[HouseholdResponse]]:
-    """현재 user 가 멤버인 가계부 목록"""
+) -> ApiResponse[HouseholdListResponse]:
+    """현재 user 가 멤버인 가계부 목록 (CursorPage 봉투 통일)"""
     response = await service.list_households(db, current_user)
     return ApiResponse.ok(data=response)
 
@@ -78,8 +80,8 @@ async def list_household_members(
     household_id: UUID,
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
-) -> ApiResponse[list[HouseholdMemberResponse]]:
-    """가계부 멤버 목록 — 본인이 멤버일 때만"""
+) -> ApiResponse[HouseholdMemberListResponse]:
+    """가계부 멤버 목록 — 본인이 멤버일 때만 (CursorPage 봉투 통일)"""
     response = await service.list_household_members(db, household_id, current_user)
     return ApiResponse.ok(data=response)
 

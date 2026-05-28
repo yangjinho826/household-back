@@ -5,8 +5,10 @@ from uuid import UUID
 from pydantic import model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.pagination import CursorPage
 from app.core.schema import CamelBaseModel
 from app.core.types import Money, Quantity, Rate
+from app.domain.account.schema import AccountResponse
 from app.domain.portfolio.enum import Market, PortfolioTxType
 
 
@@ -185,3 +187,53 @@ class PortfolioValueHistoryByItem(CamelBaseModel):
     code: str
     market: Market
     history: list[PortfolioValueHistoryPoint]
+
+
+# =========================================================
+# Page-level overview responses (페이지 진입 시 1호출)
+# =========================================================
+
+
+class PortfolioOverviewSummary(CamelBaseModel):
+    """포트폴리오 메인 hero — 전체 투자 계좌 합산"""
+
+    total_balance: Money
+    total_cash: Money
+    total_valuation: Money
+    total_cost: Money
+    total_profit: Money
+    total_rate: Rate
+
+
+class InvestmentAccountWithPortfolios(CamelBaseModel):
+    """투자 계좌 1건 + 그 계좌의 보유 종목 묶음"""
+
+    account: AccountResponse
+    portfolios: list[PortfolioResponse]
+
+
+class PortfolioOverviewResponse(CamelBaseModel):
+    """포트폴리오 메인 페이지 진입 응답 — account + portfolio 한 번에"""
+
+    summary: PortfolioOverviewSummary
+    investment_accounts: list[InvestmentAccountWithPortfolios]
+
+
+class AccountOverviewResponse(CamelBaseModel):
+    """계좌 상세 페이지 진입 응답.
+
+    INVESTMENT 통장은 portfolios 가 채워지고, 그 외 타입은 빈 리스트.
+    """
+
+    account: AccountResponse
+    portfolios: list[PortfolioResponse]
+
+
+class PortfolioFormOptionsResponse(CamelBaseModel):
+    """종목 등록/수정 폼 옵션 — INVESTMENT 계좌 옵션만"""
+
+    investment_accounts: list[AccountResponse]
+
+
+# 종목 단건 거래 내역 — 커서 무한 스크롤
+PortfolioTxPage = CursorPage[PortfolioTxResponse]

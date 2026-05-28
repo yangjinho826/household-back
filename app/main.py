@@ -17,11 +17,14 @@ from app.domain.category.router import router as category_router
 from app.domain.enum.router import router as enum_router
 from app.domain.fixed.router import router as fixed_router
 from app.domain.health.router import router as health_router
+from app.domain.home.router import router as home_router
 from app.domain.household.router import router as household_router
 from app.domain.portfolio.router import router as portfolio_router
+from app.domain.settings.router import router as settings_router
 from app.domain.stats.router import router as stats_router
 from app.domain.transaction.router import router as transaction_router
 from app.domain.user.router import router as user_router
+from app.domain.wealth.router import router as wealth_router
 
 setup_logging()
 
@@ -63,4 +66,7 @@ app.include_router(fixed_router)
 app.include_router(account_snapshot_router)
 app.include_router(portfolio_router)
 app.include_router(stats_router)
+app.include_router(home_router)
+app.include_router(wealth_router)
+app.include_router(settings_router)
 app.include_router(enum_router)

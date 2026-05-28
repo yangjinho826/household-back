@@ -10,11 +10,15 @@ from app.domain.household.deps import CurrentHousehold
 from app.domain.portfolio import service
 from app.domain.portfolio.enum import Market
 from app.domain.portfolio.schema import (
+    AccountOverviewResponse,
     PortfolioBuyRequest,
     PortfolioCreateRequest,
+    PortfolioFormOptionsResponse,
     PortfolioLookupResponse,
+    PortfolioOverviewResponse,
     PortfolioResponse,
     PortfolioSellRequest,
+    PortfolioTxPage,
     PortfolioTxResponse,
     PortfolioTxUpdateRequest,
     PortfolioUpdateRequest,
@@ -24,6 +28,78 @@ from app.domain.portfolio.schema import (
 )
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+
+
+# =========================================================
+# Page-level entry endpoints (페이지 1호출)
+# =========================================================
+
+
+@router.get("/overview")
+async def get_overview(
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PortfolioOverviewResponse]:
+    """포트폴리오 메인 페이지 진입 — INVESTMENT 계좌 + 종목 묶음 + 요약"""
+    response = await service.get_portfolio_overview(db, household)
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/accounts/{account_id}/overview")
+async def get_account_overview(
+    account_id: UUID,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[AccountOverviewResponse]:
+    """계좌 상세 페이지 진입 — 통장 + (INVESTMENT 면) 보유 종목"""
+    response = await service.get_account_overview(db, household, account_id)
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/form-options")
+async def get_form_options(
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PortfolioFormOptionsResponse]:
+    """종목 등록/수정 폼 옵션 — INVESTMENT 계좌만"""
+    response = await service.get_portfolio_form_options(db, household)
+    return ApiResponse.ok(data=response)
+
+
+# =========================================================
+# Item-level (단건 + 그 거래 내역)
+# =========================================================
+
+
+@router.get("/items/{item_id}")
+async def get_item(
+    item_id: UUID,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PortfolioResponse]:
+    """종목 단건 조회 — PNL 포함"""
+    response = await service.get_portfolio_detail(db, household, item_id)
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/items/{item_id}/transactions")
+async def list_item_transactions(
+    item_id: UUID,
+    household: CurrentHousehold,
+    cursor: str | None = Query(None),
+    limit: int = Query(30, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PortfolioTxPage]:
+    """종목 단건 거래 내역 — 무한 스크롤 (cursor + limit)"""
+    response = await service.list_item_transactions_cursor(
+        db, household, item_id, cursor, limit,
+    )
+    return ApiResponse.ok(data=response)
+
+
+# =========================================================
+# Mutations + utility (action endpoints)
+# =========================================================
 
 
 @router.get("/lookup")
@@ -36,17 +112,6 @@ async def lookup_stock(
     """야후 파이낸스로 종목명 + 현재가 조회 — 폼 자동 채움용 (저장 X).
     USD 시장은 KRW 로 환산해 응답."""
     response = await service.lookup_stock(db, market, code)
-    return ApiResponse.ok(data=response)
-
-
-@router.get("/list")
-async def list_portfolio(
-    household: CurrentHousehold,
-    account_id: UUID | None = Query(None, alias="accountId"),
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[list[PortfolioResponse]]:
-    """보유 종목 목록 (PNL 포함). accountId 옵션 — 통장별 필터"""
-    response = await service.list_portfolio(db, household, account_id)
     return ApiResponse.ok(data=response)
 
 
@@ -97,17 +162,6 @@ async def sell_portfolio(
     return ApiResponse.ok(data=response)
 
 
-@router.get("/transactions")
-async def list_portfolio_transactions(
-    household: CurrentHousehold,
-    account_id: UUID | None = Query(None, alias="accountId"),
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[list[PortfolioTxResponse]]:
-    """매수/매도 이력"""
-    response = await service.list_portfolio_transactions(db, household, account_id)
-    return ApiResponse.ok(data=response)
-
-
 @router.put("/transactions/{tx_id}")
 async def update_portfolio_transaction(
     tx_id: UUID,
@@ -131,17 +185,6 @@ async def delete_portfolio_transaction(
     return ApiResponse.ok()
 
 
-@router.get("/detail/{item_id}")
-async def get_portfolio_detail(
-    item_id: UUID,
-    household: CurrentHousehold,
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[PortfolioResponse]:
-    """종목 단건 조회 — PNL 포함"""
-    response = await service.get_portfolio_detail(db, household, item_id)
-    return ApiResponse.ok(data=response)
-
-
 @router.delete("/delete/{item_id}")
 async def delete_portfolio(
     item_id: UUID,
@@ -151,6 +194,11 @@ async def delete_portfolio(
     """종목 soft delete (data_stat_cd='99'). value-history 는 보존"""
     await service.delete_portfolio(db, household, item_id)
     return ApiResponse.ok()
+
+
+# =========================================================
+# Value history (차트)
+# =========================================================
 
 
 @router.get("/value-history")
@@ -166,7 +214,7 @@ async def get_portfolio_value_history_by_account(
     return ApiResponse.ok(data=response)
 
 
-@router.get("/{item_id}/value-history")
+@router.get("/items/{item_id}/value-history")
 async def get_portfolio_value_history_by_item(
     item_id: UUID,
     household: CurrentHousehold,

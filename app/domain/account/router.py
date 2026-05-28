@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
 from app.core.database import get_db
+from app.core.pagination import CursorPage
 from app.domain.account import service
 from app.domain.account.schema import (
     AccountCreateRequest,
@@ -23,13 +24,15 @@ async def list_accounts(
     household: CurrentHousehold,
     q: Annotated[AccountListQuery, Query()],
     db: AsyncSession = Depends(get_db),
-) -> ApiResponse[list[AccountResponse]]:
-    """통장 목록 — searchTerm/accountType/isArchived 필터"""
-    response = await service.list_accounts(
+) -> ApiResponse[CursorPage[AccountResponse]]:
+    """통장 목록 (cursor 무한 스크롤) — searchTerm/accountType/isArchived 필터"""
+    response = await service.list_accounts_cursor(
         db, household,
         search_term=q.search_term,
         account_type=q.account_type.value if q.account_type else None,
         is_archived=q.is_archived,
+        cursor=q.cursor,
+        limit=q.limit,
     )
     return ApiResponse.ok(data=response)
 

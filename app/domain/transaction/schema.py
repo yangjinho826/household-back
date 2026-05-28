@@ -5,8 +5,13 @@ from uuid import UUID
 from pydantic import Field, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.pagination import CursorPage
 from app.core.schema import CamelBaseModel
 from app.core.types import Money
+from app.domain.account.schema import AccountResponse
+from app.domain.category.schema import CategoryResponse
+from app.domain.fixed.schema import FixedResponse
+from app.domain.stats.schema import CategoryStatsItem
 from app.domain.transaction.enum import TxType
 
 
@@ -110,18 +115,7 @@ class TransactionResponse(CamelBaseModel):
     memo: str | None
 
 
-class TransactionListResponse(CamelBaseModel):
-    """거래 목록 — 커서 기반 페이징.
-
-    다른 도메인은 단순 list[Response] 를 반환 (전체 조회 + 프론트에서 wrap).
-    transaction 만 데이터량이 많아 커서 페이징 적용.
-    프론트는 nextCursor 가 null 아닐 때까지 추가 fetch.
-    """
-
-    items: list[TransactionResponse]
-    next_cursor: str | None
-    has_next: bool
-    total_count: int
+TransactionListResponse = CursorPage[TransactionResponse]
 
 
 class CalendarDay(CamelBaseModel):
@@ -139,3 +133,27 @@ class CalendarResponse(CamelBaseModel):
     monthly_expense: Money
     monthly_transfer: Money
     days: list[CalendarDay]
+
+
+class CalendarFullResponse(CamelBaseModel):
+    """달력 페이지 진입 1호출 — 일별 합계 + 카테고리별 stats + 그달 거래.
+
+    캘린더 UI 가 필요한 모든 데이터를 한 번에. by_category 는 차트/카드 확장 여지.
+    """
+
+    year: int
+    month: int
+    monthly_income: Money
+    monthly_expense: Money
+    monthly_transfer: Money
+    days: list[CalendarDay]
+    by_category: list[CategoryStatsItem]
+    transactions: list[TransactionResponse]
+
+
+class TransactionFormOptionsResponse(CamelBaseModel):
+    """거래 등록/수정 폼 옵션 — 통장 + 카테고리 + 활성 고정지출"""
+
+    accounts: list[AccountResponse]
+    categories: list[CategoryResponse]
+    fixed_expenses: list[FixedResponse]

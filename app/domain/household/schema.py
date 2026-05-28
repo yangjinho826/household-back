@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.pagination import CursorPage
 from app.core.schema import CamelBaseModel
 from app.domain.household.enum import HouseholdRole
 
@@ -70,3 +71,9 @@ class HouseholdMemberCreateRequest(CamelBaseModel):
             # OWNER 추가는 household 생성 시에만 자동으로. API 로 OWNER 추가 X
             raise CustomException(ErrorCode.BAD_REQUEST)
         return self
+
+
+# 모든 list 응답은 CursorPage 봉투로 통일. household / members 는 작은 list 라
+# cursor 페이징 의미 없지만 형식만 맞춤 (next_cursor=None, has_next=False).
+HouseholdListResponse = CursorPage[HouseholdResponse]
+HouseholdMemberListResponse = CursorPage[HouseholdMemberResponse]

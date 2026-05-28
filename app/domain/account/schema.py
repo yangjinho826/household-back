@@ -1,7 +1,7 @@
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.schema import CamelBaseModel
@@ -10,8 +10,14 @@ from app.domain.account.enum import AccountType
 
 
 class AccountListQuery(CamelBaseModel):
-    """통장 목록 쿼리 파라미터."""
+    """통장 목록 쿼리 파라미터 (cursor 무한 스크롤).
 
+    cursor / limit 도 같은 모델 안에 둠 — transaction 과 동일 이유 (fastapi
+    Annotated[Model, Query()] 패턴은 별도 Query 파라미터가 공존하면 모델 unwrap 실패).
+    """
+
+    cursor: str | None = None
+    limit: int = Field(30, ge=1, le=200)
     search_term: str | None = None
     account_type: AccountType | None = None
     is_archived: bool | None = None
