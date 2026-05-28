@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
@@ -221,6 +221,47 @@ class PortfolioTransactionRepository:
     async def save(self, tx: PortfolioTransaction) -> None:
         self.db.add(tx)
         await self.db.flush()
+
+    @staticmethod
+    def _cursor_after(cursor: str | None):
+        """tx_date DESC, id DESC 정렬 기준 cursor 조건 — transaction 패턴 그대로"""
+        if not cursor:
+            return None
+        try:
+            date_str, id_str = cursor.split("|", 1)
+            cur_date = date.fromisoformat(date_str)
+            cur_id = UUID(id_str)
+        except (ValueError, AttributeError):
+            return None
+        return or_(
+            PortfolioTransaction.tx_date < cur_date,
+            and_(
+                PortfolioTransaction.tx_date == cur_date,
+                PortfolioTransaction.id < cur_id,
+            ),
+        )
+
+    async def list_active_by_item_id_cursor(
+        self, item_id: UUID, cursor: str | None, limit: int,
+    ) -> list[PortfolioTransaction]:
+        """종목 단건 거래 내역 — 무한 스크롤. limit+1 로 has_next 판정."""
+        conds = [
+            PortfolioTransaction.portfolio_item_id == item_id,
+            PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+        ]
+        cursor_cond = self._cursor_after(cursor)
+        if cursor_cond is not None:
+            conds.append(cursor_cond)
+        result = await self.db.execute(
+            select(PortfolioTransaction)
+            .where(and_(*conds))
+            .order_by(
+                PortfolioTransaction.tx_date.desc(),
+                PortfolioTransaction.id.desc(),
+            )
+            .limit(limit + 1)
+        )
+        return list(result.scalars().all())
 
 
 class PortfolioValueHistoryRepository:

@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import Field, model_validator
 
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.pagination import CursorPage
 from app.core.schema import CamelBaseModel
 from app.core.types import Money
 from app.domain.transaction.enum import TxType
@@ -110,18 +111,7 @@ class TransactionResponse(CamelBaseModel):
     memo: str | None
 
 
-class TransactionListResponse(CamelBaseModel):
-    """거래 목록 — 커서 기반 페이징.
-
-    다른 도메인은 단순 list[Response] 를 반환 (전체 조회 + 프론트에서 wrap).
-    transaction 만 데이터량이 많아 커서 페이징 적용.
-    프론트는 nextCursor 가 null 아닐 때까지 추가 fetch.
-    """
-
-    items: list[TransactionResponse]
-    next_cursor: str | None
-    has_next: bool
-    total_count: int
+TransactionListResponse = CursorPage[TransactionResponse]
 
 
 class CalendarDay(CamelBaseModel):

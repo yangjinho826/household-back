@@ -34,12 +34,19 @@ from app.domain.portfolio.repository import (
     PortfolioTransactionRepository,
     PortfolioValueHistoryRepository,
 )
+from app.domain.account.schema import AccountResponse
 from app.domain.portfolio.schema import (
+    AccountOverviewResponse,
+    InvestmentAccountWithPortfolios,
     PortfolioBuyRequest,
     PortfolioCreateRequest,
+    PortfolioFormOptionsResponse,
     PortfolioLookupResponse,
+    PortfolioOverviewResponse,
+    PortfolioOverviewSummary,
     PortfolioResponse,
     PortfolioSellRequest,
+    PortfolioTxPage,
     PortfolioTxResponse,
     PortfolioTxUpdateRequest,
     PortfolioUpdateRequest,
@@ -141,24 +148,6 @@ async def lookup_stock(
         current_price=price,
         yahoo_symbol=yahoo_symbol,
     )
-
-
-async def list_portfolio(
-    db: AsyncSession, household: Household, account_id: UUID | None = None,
-) -> list[PortfolioResponse]:
-    """보유 종목 목록 (옵션: account_id 필터)"""
-    repo = PortfolioItemRepository(db)
-    if account_id:
-        items = await repo.find_active_by_account_id(account_id)
-        items = [i for i in items if i.household_id == household.id]
-    else:
-        items = await repo.find_active_by_household_id(household.id)
-
-    account_ids = list({i.account_id for i in items})
-    accounts = await AccountRepository(db).find_by_ids(account_ids)
-    account_map = {a.id: a for a in accounts}
-
-    return [_build_response(i, account_map) for i in items]
 
 
 async def create_portfolio(
@@ -310,24 +299,6 @@ async def sell(
 
     accounts = await AccountRepository(db).find_by_ids([item.account_id])
     return _build_response(item, {a.id: a for a in accounts})
-
-
-async def list_portfolio_transactions(
-    db: AsyncSession, household: Household, account_id: UUID | None = None,
-) -> list[PortfolioTxResponse]:
-    """매수/매도 이력 조회"""
-    repo = PortfolioTransactionRepository(db)
-    if account_id:
-        rows = await repo.find_active_by_account_id(account_id)
-        rows = [r for r in rows if r.household_id == household.id]
-    else:
-        rows = await repo.find_active_by_household_id(household.id)
-
-    account_ids = list({r.account_id for r in rows})
-    accounts = await AccountRepository(db).find_by_ids(account_ids)
-    account_map = {a.id: a for a in accounts}
-
-    return [_build_tx_response(r, account_map) for r in rows]
 
 
 async def _recalc_item_from_transactions(
@@ -537,3 +508,159 @@ async def get_value_history_by_item(
         market=Market(item.market),
         history=[_to_history_point(r) for r in rows],
     )
+
+
+# =========================================================
+# Page-level overview / form-options (페이지 진입 시 1호출)
+# =========================================================
+
+
+def _zero_summary() -> PortfolioOverviewSummary:
+    z = Decimal("0")
+    return PortfolioOverviewSummary(
+        total_balance=z, total_cash=z, total_valuation=z,
+        total_cost=z, total_profit=z, total_rate=z,
+    )
+
+
+async def get_portfolio_overview(
+    db: AsyncSession, household: Household,
+) -> PortfolioOverviewResponse:
+    """포트폴리오 메인 진입 응답 — INVESTMENT 계좌 + 그 종목 합쳐서 한번에"""
+    # 순환 import 방지 — 함수 안에서 import
+    from app.domain.account import service as account_service
+
+    accounts = await account_service.list_accounts(db, household)
+    investment_accounts = [a for a in accounts if a.account_type == AccountType.INVESTMENT]
+
+    if not investment_accounts:
+        return PortfolioOverviewResponse(
+            summary=_zero_summary(), investment_accounts=[],
+        )
+
+    # 모든 INVESTMENT 계좌의 종목 한 번에 조회 + 계좌별 그룹화
+    pi_repo = PortfolioItemRepository(db)
+    items = await pi_repo.find_active_by_household_id(household.id)
+    account_map = {a.id: a for a in await AccountRepository(db).find_by_ids(
+        [a.id for a in investment_accounts]
+    )}
+    portfolios_by_account: dict[UUID, list[PortfolioResponse]] = {}
+    for it in items:
+        if it.account_id not in account_map:
+            continue
+        portfolios_by_account.setdefault(it.account_id, []).append(
+            _build_response(it, account_map),
+        )
+
+    total_balance = sum((a.balance for a in investment_accounts), Decimal("0"))
+    total_cash = sum((a.cash or Decimal("0") for a in investment_accounts), Decimal("0"))
+    total_valuation = sum(
+        (a.portfolio_valuation or Decimal("0") for a in investment_accounts), Decimal("0"),
+    )
+    total_cost = sum(
+        (a.portfolio_cost or Decimal("0") for a in investment_accounts), Decimal("0"),
+    )
+    total_profit = sum(
+        (a.portfolio_profit_loss or Decimal("0") for a in investment_accounts), Decimal("0"),
+    )
+    total_rate = (
+        (total_profit / total_cost * Decimal("100")) if total_cost > 0 else Decimal("0")
+    )
+
+    summary = PortfolioOverviewSummary(
+        total_balance=total_balance,
+        total_cash=total_cash,
+        total_valuation=total_valuation,
+        total_cost=total_cost,
+        total_profit=total_profit,
+        total_rate=total_rate,
+    )
+
+    return PortfolioOverviewResponse(
+        summary=summary,
+        investment_accounts=[
+            InvestmentAccountWithPortfolios(
+                account=a,
+                portfolios=portfolios_by_account.get(a.id, []),
+            )
+            for a in investment_accounts
+        ],
+    )
+
+
+async def get_account_overview(
+    db: AsyncSession, household: Household, account_id: UUID,
+) -> AccountOverviewResponse:
+    """계좌 상세 페이지 진입 응답.
+
+    INVESTMENT 통장이면 보유 종목까지 함께. 그 외 타입은 portfolios=[].
+    """
+    # 순환 import 방지
+    from app.domain.account import service as account_service
+
+    account = await account_service.get_account_detail(db, household, account_id)
+    if account.account_type != AccountType.INVESTMENT:
+        return AccountOverviewResponse(account=account, portfolios=[])
+
+    pi_repo = PortfolioItemRepository(db)
+    items = await pi_repo.find_active_by_account_id(account_id)
+    # find_active_by_account_id 는 household 필터 없어서 명시적으로 다시 거름
+    items = [i for i in items if i.household_id == household.id]
+
+    accounts = await AccountRepository(db).find_by_ids([account_id])
+    account_map = {a.id: a for a in accounts}
+
+    return AccountOverviewResponse(
+        account=account,
+        portfolios=[_build_response(i, account_map) for i in items],
+    )
+
+
+async def list_item_transactions_cursor(
+    db: AsyncSession,
+    household: Household,
+    item_id: UUID,
+    cursor: str | None,
+    limit: int,
+) -> PortfolioTxPage:
+    """종목 단건 거래 내역 — 무한 스크롤. transaction 패턴 그대로."""
+    # 종목 소유권 검증
+    item = await PortfolioItemRepository(db).find_by_id(item_id)
+    if not item or item.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    pt_repo = PortfolioTransactionRepository(db)
+    rows = await pt_repo.list_active_by_item_id_cursor(item_id, cursor, limit)
+    has_next = len(rows) > limit
+    rows = rows[:limit]
+
+    accounts = await AccountRepository(db).find_by_ids(
+        list({r.account_id for r in rows}),
+    )
+    account_map = {a.id: a for a in accounts}
+    items = [_build_tx_response(r, account_map) for r in rows]
+
+    next_cursor: str | None = None
+    if has_next and rows:
+        last = rows[-1]
+        next_cursor = f"{last.tx_date.isoformat()}|{last.id}"
+
+    return PortfolioTxPage(
+        items=items,
+        next_cursor=next_cursor,
+        has_next=has_next,
+        total_count=None,  # 무한 스크롤 — 카운트 미사용
+    )
+
+
+async def get_portfolio_form_options(
+    db: AsyncSession, household: Household,
+) -> PortfolioFormOptionsResponse:
+    """종목 등록/수정 폼 옵션 — INVESTMENT 계좌만"""
+    # 순환 import 방지
+    from app.domain.account import service as account_service
+
+    accounts = await account_service.list_accounts(
+        db, household, account_type=AccountType.INVESTMENT.value, is_archived=False,
+    )
+    return PortfolioFormOptionsResponse(investment_accounts=accounts)
