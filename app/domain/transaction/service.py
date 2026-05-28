@@ -18,8 +18,10 @@ from app.domain.transaction.repository import (
 )
 from app.domain.transaction.schema import (
     CalendarDay,
+    CalendarFullResponse,
     CalendarResponse,
     TransactionCreateRequest,
+    TransactionFormOptionsResponse,
     TransactionListResponse,
     TransactionResponse,
     TransactionUpdateRequest,
@@ -235,6 +237,54 @@ async def _single_response(db: AsyncSession, tx: Transaction) -> TransactionResp
         tx,
         {a.id: a for a in accounts},
         {c.id: c for c in categories},
+    )
+
+
+async def get_calendar_full(
+    db: AsyncSession, household: Household, year: int, month: int,
+) -> CalendarFullResponse:
+    """달력 페이지 1호출 — calendar(일별 합계) + stats(카테고리별) + 그달 거래 전부."""
+    # 순환 import 방지 — 함수 안에서 import
+    from app.domain.stats import service as stats_service
+
+    calendar = await get_calendar(db, household, year, month)
+    stats = await stats_service.get_monthly_stats(db, household, year, month)
+
+    f = TransactionFilter(year=year, month=month)
+    # 한 달치 거래 — 가계부 평균 100 미만이라 cursor 페이징 불필요, 큰 limit 로 통째.
+    tx_page = await list_transactions(db, household, f, cursor=None, limit=500)
+
+    return CalendarFullResponse(
+        year=calendar.year,
+        month=calendar.month,
+        monthly_income=calendar.monthly_income,
+        monthly_expense=calendar.monthly_expense,
+        monthly_transfer=calendar.monthly_transfer,
+        days=calendar.days,
+        by_category=stats.by_category,
+        transactions=tx_page.items,
+    )
+
+
+async def get_form_options(
+    db: AsyncSession, household: Household,
+) -> TransactionFormOptionsResponse:
+    """거래 등록/수정 폼 옵션 — 통장 + 카테고리 + 활성 고정지출 한 번에."""
+    # 순환 import 방지
+    from app.domain.account import service as account_service
+    from app.domain.category import service as category_service
+    from app.domain.fixed import service as fixed_service
+
+    accounts = await account_service.list_accounts(db, household)
+    categories = await category_service.list_categories(db, household)
+    fixed_expenses = await fixed_service.list_fixed_expenses(
+        db, household, is_archived=False,
+    )
+
+    return TransactionFormOptionsResponse(
+        accounts=accounts,
+        categories=categories,
+        fixed_expenses=fixed_expenses,
     )
 
 

@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
@@ -11,8 +11,10 @@ from app.domain.household.deps import CurrentHousehold
 from app.domain.transaction import service
 from app.domain.transaction.repository import TransactionFilter
 from app.domain.transaction.schema import (
+    CalendarFullResponse,
     CalendarResponse,
     TransactionCreateRequest,
+    TransactionFormOptionsResponse,
     TransactionListQuery,
     TransactionListResponse,
     TransactionResponse,
@@ -90,4 +92,26 @@ async def get_calendar(
 ) -> ApiResponse[CalendarResponse]:
     """달력 뷰 — 일별 income/expense/transfer 합계 + 월간 합계"""
     response = await service.get_calendar(db, household, year, month)
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/calendar/{year}/{month}/full")
+async def get_calendar_full(
+    household: CurrentHousehold,
+    year: int = Path(..., ge=2000, le=2100),
+    month: int = Path(..., ge=1, le=12),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[CalendarFullResponse]:
+    """달력 페이지 1호출 — calendar + stats(카테고리) + 그달 거래 전부"""
+    response = await service.get_calendar_full(db, household, year, month)
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/form-options")
+async def get_form_options(
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[TransactionFormOptionsResponse]:
+    """거래 등록/수정 폼 옵션 — 통장 + 카테고리 + 활성 고정지출"""
+    response = await service.get_form_options(db, household)
     return ApiResponse.ok(data=response)
