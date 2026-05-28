@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.pagination import CursorPage
 from app.domain.household.enum import HouseholdRole
 from app.domain.household.model import Household, HouseholdMember
 from app.domain.household.repository import (
@@ -14,7 +15,9 @@ from app.domain.household.repository import (
 )
 from app.domain.household.schema import (
     HouseholdCreateRequest,
+    HouseholdListResponse,
     HouseholdMemberCreateRequest,
+    HouseholdMemberListResponse,
     HouseholdMemberResponse,
     HouseholdResponse,
     HouseholdUpdateRequest,
@@ -37,17 +40,26 @@ def _build_response(household: Household, role: HouseholdRole) -> HouseholdRespo
     )
 
 
-async def list_households(db: AsyncSession, current_user: User) -> list[HouseholdResponse]:
-    """현재 user 가 멤버인 가계부 목록"""
+async def list_households(
+    db: AsyncSession, current_user: User,
+) -> HouseholdListResponse:
+    """현재 user 가 멤버인 가계부 목록.
+
+    한 user 의 가입 household 가 보통 1~5개라 cursor 페이징은 의미 없음.
+    CursorPage 형식만 통일 (next_cursor=None, has_next=False, total_count=len).
+    """
     repo = HouseholdRepository(db)
     households = await repo.find_active_by_user_id(current_user.id)
-    return [
+    items = [
         _build_response(
             h,
             HouseholdRole.OWNER if h.owner_id == current_user.id else HouseholdRole.MEMBER,
         )
         for h in households
     ]
+    return CursorPage(
+        items=items, next_cursor=None, has_next=False, total_count=len(items),
+    )
 
 
 async def create_household(
@@ -163,8 +175,12 @@ async def _require_owner(
 
 async def list_household_members(
     db: AsyncSession, household_id: UUID, current_user: User,
-) -> list[HouseholdMemberResponse]:
-    """가계부 멤버 목록 — 본인이 멤버일 때만 조회 가능"""
+) -> HouseholdMemberListResponse:
+    """가계부 멤버 목록 — 본인이 멤버일 때만 조회 가능.
+
+    한 가계부 멤버 수가 보통 1~10 이라 cursor 페이징은 의미 없음.
+    CursorPage 형식만 통일.
+    """
     await _require_membership(db, household_id, current_user.id)
 
     member_repo = HouseholdMemberRepository(db)
@@ -174,7 +190,10 @@ async def list_household_members(
     users = await UserRepository(db).find_by_ids(user_ids) if user_ids else []
     user_map = {u.id: u for u in users}
 
-    return [_build_member_response(m, user_map.get(m.user_id)) for m in members]
+    items = [_build_member_response(m, user_map.get(m.user_id)) for m in members]
+    return CursorPage(
+        items=items, next_cursor=None, has_next=False, total_count=len(items),
+    )
 
 
 async def add_household_member(
