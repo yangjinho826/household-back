@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
 from app.core.database import get_db
+from app.core.pagination import CursorPage
 from app.domain.category import service
 from app.domain.category.schema import (
     CategoryCreateRequest,
@@ -23,13 +24,15 @@ async def list_categories(
     household: CurrentHousehold,
     q: Annotated[CategoryListQuery, Query()],
     db: AsyncSession = Depends(get_db),
-) -> ApiResponse[list[CategoryResponse]]:
-    """카테고리 목록 — searchTerm/kind/isArchived 필터"""
-    response = await service.list_categories(
+) -> ApiResponse[CursorPage[CategoryResponse]]:
+    """카테고리 목록 (cursor 무한 스크롤) — searchTerm/kind/isArchived 필터"""
+    response = await service.list_categories_cursor(
         db, household,
         search_term=q.search_term,
         kind=q.kind.value if q.kind else None,
         is_archived=q.is_archived,
+        cursor=q.cursor,
+        limit=q.limit,
     )
     return ApiResponse.ok(data=response)
 

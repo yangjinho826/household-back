@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.api_response import ApiResponse
 from app.core.database import get_db
 from app.core.exceptions import CustomException, ErrorCode
+from app.core.pagination import CursorPage
 from app.domain.fixed import service
 from app.domain.fixed.schema import (
     FixedCreateRequest,
@@ -27,12 +28,14 @@ async def list_fixed_expenses(
     household: CurrentHousehold,
     q: Annotated[FixedListQuery, Query()],
     db: AsyncSession = Depends(get_db),
-) -> ApiResponse[list[FixedResponse]]:
-    """고정지출 목록 — searchTerm/isArchived 필터"""
-    response = await service.list_fixed_expenses(
+) -> ApiResponse[CursorPage[FixedResponse]]:
+    """고정지출 목록 (cursor 무한 스크롤) — searchTerm/isArchived 필터"""
+    response = await service.list_fixed_expenses_cursor(
         db, household,
         search_term=q.search_term,
         is_archived=q.is_archived,
+        cursor=q.cursor,
+        limit=q.limit,
     )
     return ApiResponse.ok(data=response)
 
