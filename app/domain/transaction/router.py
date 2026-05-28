@@ -12,7 +12,6 @@ from app.domain.transaction import service
 from app.domain.transaction.repository import TransactionFilter
 from app.domain.transaction.schema import (
     CalendarFullResponse,
-    CalendarResponse,
     TransactionCreateRequest,
     TransactionFormOptionsResponse,
     TransactionListQuery,
@@ -80,18 +79,6 @@ async def get_transaction_detail(
 ) -> ApiResponse[TransactionResponse]:
     """거래 단건 조회"""
     response = await service.get_transaction_detail(db, household, tx_id)
-    return ApiResponse.ok(data=response)
-
-
-@router.get("/calendar")
-async def get_calendar(
-    household: CurrentHousehold,
-    year: int = Query(..., ge=2000, le=2100),
-    month: int = Query(..., ge=1, le=12),
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[CalendarResponse]:
-    """달력 뷰 — 일별 income/expense/transfer 합계 + 월간 합계"""
-    response = await service.get_calendar(db, household, year, month)
     return ApiResponse.ok(data=response)
 
 
