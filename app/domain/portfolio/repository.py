@@ -42,6 +42,18 @@ class PortfolioItemRepository:
         )
         return list(result.scalars().all())
 
+    async def count_active_by_household_id(self, household_id: UUID) -> int:
+        """settings overview 종목 카운트용"""
+        result = await self.db.execute(
+            select(func.count(PortfolioItem.id)).where(
+                and_(
+                    PortfolioItem.household_id == household_id,
+                    PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+        )
+        return result.scalar() or 0
+
     async def find_active_by_account_id(self, account_id: UUID) -> list[PortfolioItem]:
         result = await self.db.execute(
             select(PortfolioItem)
