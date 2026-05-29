@@ -5,30 +5,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp
 
-from app.core.auth.jwt import decode_token
+from app.core.auth.extract import extract_user_id
 
 logger = logging.getLogger("app.access")
 
 # `root_path="/api"` 가 적용된 환경에서 헬스체크 실제 path 는 `/api/health`.
 # endswith 매칭으로 root_path 유무 모두 커버.
 _HEALTH_PATHS: tuple[str, ...] = ("/health",)
-
-
-def _extract_user_id(request: Request) -> str:
-    """Authorization 헤더에서 JWT 디코드해 user id 추출 — 로그 전용 가벼운 호출.
-
-    실제 인증은 Depends 계층(`get_current_active_user`)이 별도로 수행.
-    여기는 토큰 위조 시 anonymous 로 표시하기 위해 검증 포함된 decode_token 을 그대로 재사용.
-    """
-    auth = request.headers.get("authorization", "")
-    if not auth.lower().startswith("bearer "):
-        return "-"
-    token = auth[7:].strip()
-    try:
-        payload = decode_token(token)
-    except Exception:
-        return "-"
-    return str(payload.get("sub") or "-")
 
 
 def _is_health_path(path: str) -> bool:
@@ -52,7 +35,8 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
         client_ip = request.client.host if request.client else "-"
-        user_id = _extract_user_id(request)
+        user_id_obj = extract_user_id(request)
+        user_id = str(user_id_obj) if user_id_obj else "-"
 
         msg = (
             f"{request.method} {path} {response.status_code} "

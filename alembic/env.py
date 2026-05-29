@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.core.config import settings
+from app.core.idempotency.model import IdempotencyRecord  # noqa: F401
 from app.core.model import Base
 
 # 모든 도메인 모델을 import — Base.metadata 에 등록

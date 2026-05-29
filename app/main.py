@@ -7,6 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import close_db, init_db
 from app.core.exceptions.handlers import register_exception_handlers
+from app.core.idempotency.middleware import IdempotencyMiddleware
 from app.core.logging import setup_logging
 from app.core.middleware import AccessLogMiddleware
 from app.core.scheduler import register_jobs, scheduler
@@ -55,6 +56,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(AccessLogMiddleware)
+app.add_middleware(IdempotencyMiddleware)
 app.include_router(health_router)
 app.include_router(user_router)
 app.include_router(auth_router)
