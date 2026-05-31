@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
@@ -307,6 +307,18 @@ class PortfolioValueHistoryRepository:
             return
         self.db.add_all(histories)
         await self.db.flush()
+
+    async def delete_for_household_month(
+        self, household_id: UUID, snapshot_date: date,
+    ) -> None:
+        """그 가계부의 해당 월 종목 박제 hard delete (upsert 재생성용)."""
+        stmt = delete(PortfolioValueHistory).where(
+            and_(
+                PortfolioValueHistory.household_id == household_id,
+                PortfolioValueHistory.snapshot_date == snapshot_date,
+            )
+        )
+        await self.db.execute(stmt)
 
     async def has_active_for_month(self, household_id: UUID, month_date: date) -> bool:
         """이번 달에 종목 박제됐는지 (account_snapshot 과 동일 패턴)"""

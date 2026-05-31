@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
-from app.core.exceptions import CustomException, ErrorCode
 from app.domain.account.model import Account
 from app.domain.account.repository import AccountRepository
 from app.domain.account.service import _calc_balance
@@ -85,18 +84,28 @@ def _target_month() -> date:
 
 
 async def _build_and_save_snapshot(
-    db: AsyncSession, household: Household, target_date: date,
+    db: AsyncSession, household: Household, target_date: date, *, replace: bool = False,
 ) -> SnapshotMonth:
     """실제 박제 실행 — 중복 체크 없음 (호출자가 책임).
 
     계좌별 잔액 + 그달 수입/지출/고정지출 박제 + 종목 평가액 박제.
+    replace=True 면 그달 기존 박제를 먼저 지우고 다시 만듦 (upsert).
     """
+    if replace:
+        await AccountSnapshotRepository(db).delete_for_household_month(
+            household.id, target_date,
+        )
+
     accounts = [
         a for a in await AccountRepository(db).find_active_by_household_id(household.id)
         if not a.is_archived
     ]
     if not accounts:
-        # 계좌 없는 가계부 — 박제할 게 없음. 빈 월 반환.
+        # 계좌 없는 가계부 — 박제할 게 없음. replace 면 종목 박제도 정리.
+        if replace:
+            await snapshot_household_portfolio(
+                db, household, target_date, replace=True,
+            )
         return _build_month(target_date, [], {})
 
     tx_repo = TransactionRepository(db)
@@ -120,50 +129,73 @@ async def _build_and_save_snapshot(
 
     await AccountSnapshotRepository(db).save_all(snapshots)
 
-    # 종목 박제 — portfolio 도메인이 자기 책임
-    await snapshot_household_portfolio(db, household, target_date)
+    # 종목 박제 — portfolio 도메인이 자기 책임 (replace 면 그달 것 갈아끼움)
+    await snapshot_household_portfolio(db, household, target_date, replace=replace)
 
     account_map = {a.id: a for a in accounts}
     return _build_month(target_date, snapshots, account_map)
 
 
-async def create_target_month_snapshot(
-    db: AsyncSession, household: Household,
-) -> SnapshotMonth:
-    """수동 박제 — 6/1 ~ 6/말 사이 호출하면 5월 박제. 이미 있으면 raise."""
-    repo = AccountSnapshotRepository(db)
-    target_date = _target_month()
-
-    if await repo.has_active_for_month(household.id, target_date):
-        raise CustomException(ErrorCode.SNAPSHOT_ALREADY_EXISTS)
-
-    result = await _build_and_save_snapshot(db, household, target_date)
-    logger.info("자산 스냅샷 저장 (household_id=%s, date=%s)", household.id, target_date)
-    return result
+# catch-up 으로 거슬러 올라가 빠진 달을 채울 최근 개월 수
+SNAPSHOT_CATCHUP_MONTHS = 12
 
 
 async def create_monthly_snapshots_for_all(db: AsyncSession) -> int:
-    """매월 자동 박제 — 모든 활성 가계부의 지난달 박제. 이미 있으면 skip.
+    """매월 자동 박제 — catch-up + upsert.
 
-    스케줄러(매월 1일)에서 호출. 반환값은 신규 박제된 가계부 수.
+    최근 SNAPSHOT_CATCHUP_MONTHS 개월을 훑어:
+    - 최근 2개월(지난달·그전달): 항상 재계산해 덮어씀 (upsert) — 늦게 입력된 거래 정정 반영
+    - 그 이전: 빠진 달만 채움 (catch-up), 이미 있으면 보존
+
+    1일에 서버가 안 떠 누락된 달도 다음 실행 때 자동으로 메워진다.
+    스케줄러(매월 1일)에서 호출. 반환값은 신규 박제 + 갱신된 (가계부×월) 수.
     """
-    target_date = _target_month()
+    target_date = _target_month()  # 박제 기준 = 지난달
+    months = [_shift_months(target_date, -i) for i in range(SNAPSHOT_CATCHUP_MONTHS)]
+    upsert_months = {target_date, _shift_months(target_date, -1)}  # 최근 2개월
+
     repo = AccountSnapshotRepository(db)
     households = await HouseholdRepository(db).find_all_active()
 
-    created = 0
+    saved = 0
     for h in households:
-        if await repo.has_active_for_month(h.id, target_date):
-            continue
-        result = await _build_and_save_snapshot(db, h, target_date)
-        if result.accounts:  # 계좌 없는 빈 가계부는 카운트 제외
-            created += 1
+        # catch-up 하한 = 기존 최古 박제월. 박제 이력 없으면 지난달만(첫 박제).
+        oldest = await repo.oldest_active_month(h.id)
+        catchup_floor = oldest if oldest else target_date
+        for month in months:
+            if month < catchup_floor:
+                continue  # 데이터 시작 전 — 채우지 않음
+            exists = await repo.has_active_for_month(h.id, month)
+            if exists and month not in upsert_months:
+                continue  # 과거 박제는 고정 — 건드리지 않음
+            result = await _build_and_save_snapshot(db, h, month, replace=exists)
+            if result.accounts:  # 계좌 없는 빈 가계부는 카운트 제외
+                saved += 1
 
     logger.info(
-        "월간 자동 박제 완료 (households=%d, created=%d, date=%s)",
-        len(households), created, target_date,
+        "월간 자동 박제 완료 (households=%d, saved=%d, target=%s, catchup=%d개월)",
+        len(households), saved, target_date, SNAPSHOT_CATCHUP_MONTHS,
     )
-    return created
+    return saved
+
+
+async def create_target_month_snapshot(
+    db: AsyncSession, household: Household,
+) -> SnapshotMonth:
+    """수동 박제 — 지난달 박제. 이미 있으면 덮어씀 (upsert).
+
+    실수로 누락했거나(자동이 안 돈 경우) 잘못 박제된 달을 사용자가 직접 다시
+    찍을 때. 6/1~6/말에 누르면 5월 박제. 같은 달 또 눌러도 안전.
+    """
+    repo = AccountSnapshotRepository(db)
+    target_date = _target_month()
+    exists = await repo.has_active_for_month(household.id, target_date)
+    result = await _build_and_save_snapshot(db, household, target_date, replace=exists)
+    logger.info(
+        "수동 박제 (household_id=%s, date=%s, upsert=%s)",
+        household.id, target_date, exists,
+    )
+    return result
 
 
 async def get_yearly_snapshots(

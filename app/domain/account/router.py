@@ -11,6 +11,7 @@ from app.domain.account import service
 from app.domain.account.schema import (
     AccountCreateRequest,
     AccountListQuery,
+    AccountReportResponse,
     AccountResponse,
     AccountUpdateRequest,
 )
@@ -56,6 +57,17 @@ async def get_account_detail(
 ) -> ApiResponse[AccountResponse]:
     """통장 단건 조회"""
     response = await service.get_account_detail(db, household, account_id)
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/report/{account_id}")
+async def get_account_report(
+    account_id: UUID,
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[AccountReportResponse]:
+    """계좌별 리포트 — 현재 잔액 + 월별 수입/지출 추이 (최근 12개월)"""
+    response = await service.get_account_report(db, household, account_id)
     return ApiResponse.ok(data=response)
 
 

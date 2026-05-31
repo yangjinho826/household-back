@@ -1,7 +1,9 @@
 import logging
 from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,9 +15,12 @@ from app.domain.account.model import Account
 from app.domain.account.repository import AccountRepository
 from app.domain.account.schema import (
     AccountCreateRequest,
+    AccountMonthlyFlow,
+    AccountReportResponse,
     AccountResponse,
     AccountUpdateRequest,
 )
+from app.domain.account_snapshot.repository import AccountSnapshotRepository
 from app.domain.household.model import Household
 from app.domain.portfolio.repository import (
     PortfolioItemRepository,
@@ -259,3 +264,79 @@ async def get_account_detail(
     tx_repo = TransactionRepository(db)
     summary = await _calc_balance(tx_repo, account, db)
     return _build_response(account, summary)
+
+
+def _today_kst() -> date:
+    """KST 기준 오늘 — 리포트 이번달 판정용."""
+    return datetime.now(ZoneInfo("Asia/Seoul")).date()
+
+
+def _shift_months(d: date, delta: int) -> date:
+    """d 기준 delta 개월 이동한 달의 1일."""
+    total = d.year * 12 + (d.month - 1) + delta
+    return date(total // 12, total % 12 + 1, 1)
+
+
+async def get_account_report(
+    db: AsyncSession,
+    household: Household,
+    account_id: UUID,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> AccountReportResponse:
+    """계좌별 리포트 — 현재 잔액 + 월별 수입/지출 추이.
+
+    박제된 과거 월 + 아직 박제 전인 이번달(실시간 집계)을 합쳐 내려준다.
+    기본 기간은 최근 12개월(이번달 포함).
+    """
+    repo = AccountRepository(db)
+    account = await repo.find_by_id(account_id)
+    if not account or account.household_id != household.id or account.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    today = _today_kst()
+    this_month_first = today.replace(day=1)
+    if not to_date:
+        to_date = this_month_first
+    if not from_date:
+        from_date = _shift_months(to_date, -11)
+
+    snap_repo = AccountSnapshotRepository(db)
+    snaps = await snap_repo.find_by_account_and_range(account_id, from_date, to_date)
+
+    flows = [
+        AccountMonthlyFlow(
+            month_date=s.snapshot_date,
+            income=s.monthly_income,
+            expense=s.monthly_expense,
+            fixed_expense=s.monthly_fixed_expense,
+            balance=s.balance,
+        )
+        for s in snaps
+    ]
+
+    tx_repo = TransactionRepository(db)
+    summary = await _calc_balance(tx_repo, account, db)
+
+    # 이번달은 아직 박제 전 — 스냅샷에 없으면 실시간 집계로 보강 (잔액은 현재값)
+    if to_date >= this_month_first and not any(
+        s.snapshot_date == this_month_first for s in snaps
+    ):
+        m = await tx_repo.sum_by_account_for_month(account_id, today.year, today.month)
+        flows.append(
+            AccountMonthlyFlow(
+                month_date=this_month_first,
+                income=m["income"],
+                expense=m["expense"],
+                fixed_expense=m["fixed_expense"],
+                balance=summary.balance,
+            )
+        )
+
+    return AccountReportResponse(
+        account_id=account.id,
+        account_name=account.name,
+        account_type=account.account_type,
+        balance=summary.balance,
+        monthly_flows=flows,
+    )

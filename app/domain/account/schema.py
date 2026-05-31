@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -76,3 +77,26 @@ class AccountResponse(CamelBaseModel):
     portfolio_valuation: Money | None = None
     portfolio_profit_loss: Money | None = None
     portfolio_profit_loss_rate: Rate | None = None
+
+
+class AccountMonthlyFlow(CamelBaseModel):
+    """계좌별 리포트의 월 1행 — 그달 수입/지출 흐름 + 잔액."""
+
+    month_date: date  # 그달 1일
+    income: Money
+    expense: Money
+    fixed_expense: Money
+    balance: Money  # 그달 박제 잔액 (이번달은 현재 잔액)
+
+
+class AccountReportResponse(CamelBaseModel):
+    """계좌별 리포트 — 현재 잔액 + 월별 수입/지출 추이.
+
+    monthly_flows 는 박제된 과거 월 + 아직 박제 전인 이번달(실시간 집계)을 합친 것.
+    """
+
+    account_id: UUID
+    account_name: str
+    account_type: AccountType
+    balance: Money
+    monthly_flows: list[AccountMonthlyFlow]
