@@ -49,6 +49,12 @@ class PortfolioTransaction(BaseEntity):
     price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     tx_date: Mapped[date] = mapped_column(Date, nullable=False)
     memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 매도 실현손익 — SELL 만 채워짐. 매도시점 이동평균 평단 기준 건별 박제.
+    # BUY 또는 R2 이전 SELL 은 NULL (매도시점 평단 복원 불가).
+    realized_pnl: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    realized_cost_basis: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2), nullable=True,
+    )
 
 
 class PortfolioValueHistory(BaseEntity):

@@ -234,6 +234,28 @@ class PortfolioTransactionRepository:
         self.db.add(tx)
         await self.db.flush()
 
+    async def find_sell_txs_by_item(
+        self, item_id: UUID, from_date: date, to_date: date,
+    ) -> list[PortfolioTransaction]:
+        """종목의 기간 내 매도 거래 — 매매손익 집계용. 최신순."""
+        result = await self.db.execute(
+            select(PortfolioTransaction)
+            .where(
+                and_(
+                    PortfolioTransaction.portfolio_item_id == item_id,
+                    PortfolioTransaction.pt_type == PortfolioTxType.SELL,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                    PortfolioTransaction.tx_date >= from_date,
+                    PortfolioTransaction.tx_date <= to_date,
+                )
+            )
+            .order_by(
+                PortfolioTransaction.tx_date.desc(),
+                PortfolioTransaction.frst_reg_dt.desc(),
+            )
+        )
+        return list(result.scalars().all())
+
     @staticmethod
     def _cursor_after(cursor: str | None):
         """tx_date DESC, id DESC 정렬 기준 cursor 조건 — transaction 패턴 그대로"""

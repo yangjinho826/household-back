@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from app.domain.portfolio.schema import (
     PortfolioValueHistoryByAccountQuery,
     PortfolioValueHistoryByItem,
     PortfolioValueHistoryByItemQuery,
+    RealizedPnlResponse,
 )
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -93,6 +95,21 @@ async def list_item_transactions(
     """종목 단건 거래 내역 — 무한 스크롤 (cursor + limit)"""
     response = await service.list_item_transactions_cursor(
         db, household, item_id, cursor, limit,
+    )
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/items/{item_id}/realized-pnl")
+async def get_item_realized_pnl(
+    item_id: UUID,
+    household: CurrentHousehold,
+    from_date: date | None = Query(None),
+    to_date: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[RealizedPnlResponse]:
+    """종목 매매손익 — 기간 내 매도 건별 실현손익 + 요약. 기본 최근 12개월."""
+    response = await service.get_realized_pnl_by_item(
+        db, household, item_id, from_date, to_date,
     )
     return ApiResponse.ok(data=response)
 
