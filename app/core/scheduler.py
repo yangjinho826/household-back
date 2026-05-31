@@ -87,4 +87,10 @@ def register_jobs() -> None:
         id="cleanup_idempotency",
         replace_existing=True,
     )
-    logger.info("스케줄 잡 등록 완료 (4개)")
+    scheduler.add_job(
+        jobs.create_monthly_snapshots_job,
+        CronTrigger(day=1, hour=0, minute=30, timezone=KST),
+        id="create_monthly_snapshots",
+        replace_existing=True,
+    )
+    logger.info("스케줄 잡 등록 완료 (5개)")

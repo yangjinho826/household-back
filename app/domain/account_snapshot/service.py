@@ -18,6 +18,7 @@ from app.domain.account_snapshot.schema import (
     SnapshotYearlyResponse,
 )
 from app.domain.household.model import Household
+from app.domain.household.repository import HouseholdRepository
 from app.domain.portfolio.snapshot_service import snapshot_household_portfolio
 from app.domain.transaction.repository import TransactionRepository
 
@@ -78,23 +79,25 @@ def _build_month(
     )
 
 
-async def create_target_month_snapshot(
-    db: AsyncSession, household: Household,
+def _target_month() -> date:
+    """박제 대상 월 = 지난달 1일. _shift_months 가 연도 넘김 처리."""
+    return _shift_months(_normalize_to_month_first(_today_kst()), -1)
+
+
+async def _build_and_save_snapshot(
+    db: AsyncSession, household: Household, target_date: date,
 ) -> SnapshotMonth:
-    """지난달 마감 박제 — 예: 6/1 ~ 6/말 사이 호출하면 5월을 박제.
-    1월에 호출하면 작년 12월 박제.
+    """실제 박제 실행 — 중복 체크 없음 (호출자가 책임).
+
+    계좌별 잔액 + 그달 수입/지출/고정지출 박제 + 종목 평가액 박제.
     """
-    repo = AccountSnapshotRepository(db)
-    # 지난달 1일 = 이번달 1일 - 1개월. _shift_months 가 연도 넘김 처리.
-    target_date = _shift_months(_normalize_to_month_first(_today_kst()), -1)
-
-    if await repo.has_active_for_month(household.id, target_date):
-        raise CustomException(ErrorCode.SNAPSHOT_ALREADY_EXISTS)
-
     accounts = [
         a for a in await AccountRepository(db).find_active_by_household_id(household.id)
         if not a.is_archived
     ]
+    if not accounts:
+        # 계좌 없는 가계부 — 박제할 게 없음. 빈 월 반환.
+        return _build_month(target_date, [], {})
 
     tx_repo = TransactionRepository(db)
     snapshots: list[AccountSnapshot] = []
@@ -115,18 +118,52 @@ async def create_target_month_snapshot(
             )
         )
 
-    await repo.save_all(snapshots)
+    await AccountSnapshotRepository(db).save_all(snapshots)
 
     # 종목 박제 — portfolio 도메인이 자기 책임
     await snapshot_household_portfolio(db, household, target_date)
 
-    logger.info(
-        "자산 스냅샷 저장 (household_id=%s, date=%s, accounts=%d)",
-        household.id, target_date, len(snapshots),
-    )
-
     account_map = {a.id: a for a in accounts}
     return _build_month(target_date, snapshots, account_map)
+
+
+async def create_target_month_snapshot(
+    db: AsyncSession, household: Household,
+) -> SnapshotMonth:
+    """수동 박제 — 6/1 ~ 6/말 사이 호출하면 5월 박제. 이미 있으면 raise."""
+    repo = AccountSnapshotRepository(db)
+    target_date = _target_month()
+
+    if await repo.has_active_for_month(household.id, target_date):
+        raise CustomException(ErrorCode.SNAPSHOT_ALREADY_EXISTS)
+
+    result = await _build_and_save_snapshot(db, household, target_date)
+    logger.info("자산 스냅샷 저장 (household_id=%s, date=%s)", household.id, target_date)
+    return result
+
+
+async def create_monthly_snapshots_for_all(db: AsyncSession) -> int:
+    """매월 자동 박제 — 모든 활성 가계부의 지난달 박제. 이미 있으면 skip.
+
+    스케줄러(매월 1일)에서 호출. 반환값은 신규 박제된 가계부 수.
+    """
+    target_date = _target_month()
+    repo = AccountSnapshotRepository(db)
+    households = await HouseholdRepository(db).find_all_active()
+
+    created = 0
+    for h in households:
+        if await repo.has_active_for_month(h.id, target_date):
+            continue
+        result = await _build_and_save_snapshot(db, h, target_date)
+        if result.accounts:  # 계좌 없는 빈 가계부는 카운트 제외
+            created += 1
+
+    logger.info(
+        "월간 자동 박제 완료 (households=%d, created=%d, date=%s)",
+        len(households), created, target_date,
+    )
+    return created
 
 
 async def get_yearly_snapshots(
