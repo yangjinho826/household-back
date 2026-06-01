@@ -75,6 +75,10 @@ class PortfolioValueHistory(BaseEntity):
     account_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     portfolio_item_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # 박제 시점 자산 성격 — 종목 재분류돼도 과거 배분추이는 박제값 유지(aggregation loss 방지)
+    asset_class: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'STOCK'"),
+    )
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     avg_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     current_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)

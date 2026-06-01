@@ -353,6 +353,24 @@ class PortfolioValueHistoryRepository:
         )
         return list(result.scalars().all())
 
+    async def find_by_household_and_range(
+        self, household_id: UUID, from_date: date, to_date: date,
+    ) -> list[PortfolioValueHistory]:
+        """가계부 전체 종목 박제 — 월별 자산군 배분추이 집계용."""
+        result = await self.db.execute(
+            select(PortfolioValueHistory)
+            .where(
+                and_(
+                    PortfolioValueHistory.household_id == household_id,
+                    PortfolioValueHistory.snapshot_date >= from_date,
+                    PortfolioValueHistory.snapshot_date <= to_date,
+                    PortfolioValueHistory.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .order_by(PortfolioValueHistory.snapshot_date.asc())
+        )
+        return list(result.scalars().all())
+
     async def find_by_item_and_range(
         self, item_id: UUID, from_date: date, to_date: date,
     ) -> list[PortfolioValueHistory]:

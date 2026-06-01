@@ -1,3 +1,5 @@
+from datetime import date
+
 from app.core.schema import CamelBaseModel
 from app.core.types import Money, Rate
 from app.domain.account.schema import AccountResponse
@@ -13,10 +15,18 @@ class AssetClassSlice(CamelBaseModel):
     ratio: Rate  # 전체 대비 비중 (%, 0~100)
 
 
+class AllocationTrendPoint(CamelBaseModel):
+    """월별 배분추이 1포인트 — 그달 자산군별 슬라이스"""
+
+    snapshot_date: date
+    slices: list[AssetClassSlice]
+
+
 class AllocationResponse(CamelBaseModel):
-    """자산군별 배분 — 현재 시점. (월별 추이는 R5a-3 에서 allocation_trend 추가)"""
+    """자산군별 배분 — 현재 시점 + 월별 추이"""
 
     current_allocation: list[AssetClassSlice]
+    allocation_trend: list[AllocationTrendPoint]
 
 
 class WealthOverviewResponse(CamelBaseModel):

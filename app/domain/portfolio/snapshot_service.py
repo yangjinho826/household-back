@@ -62,6 +62,7 @@ async def snapshot_household_portfolio(
                     account_id=a.id,
                     portfolio_item_id=i.id,
                     snapshot_date=snapshot_date,
+                    asset_class=i.asset_class,
                     quantity=i.quantity,
                     avg_price=i.avg_price,
                     current_price=i.current_price,

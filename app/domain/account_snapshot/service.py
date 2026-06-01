@@ -198,6 +198,23 @@ async def create_target_month_snapshot(
     return result
 
 
+def resolve_snapshot_range(
+    from_date: date | None, to_date: date | None,
+) -> tuple[date, date]:
+    """조회 범위 정규화 — to=지난달(미지정 시), from=to−11개월. 모두 그달 1일.
+
+    배분추이(wealth)와 연간추이(snapshot)가 같은 축을 쓰도록 공통 사용.
+    """
+    target_month = _shift_months(_normalize_to_month_first(_today_kst()), -1)
+    to_resolved = _normalize_to_month_first(to_date) if to_date else target_month
+    from_resolved = (
+        _normalize_to_month_first(from_date)
+        if from_date
+        else _shift_months(to_resolved, -11)
+    )
+    return from_resolved, to_resolved
+
+
 async def get_yearly_snapshots(
     db: AsyncSession,
     household: Household,
@@ -205,18 +222,8 @@ async def get_yearly_snapshots(
     to_date: date | None = None,
 ) -> SnapshotYearlyResponse:
     repo = AccountSnapshotRepository(db)
-    today = _today_kst()
-    # 박제 가능한 월 = 지난달. 이번달 1일에서 -1.
-    target_month = _shift_months(_normalize_to_month_first(today), -1)
-
-    if not to_date:
-        to_date = target_month
-    else:
-        to_date = _normalize_to_month_first(to_date)
-    if not from_date:
-        from_date = _shift_months(to_date, -11)
-    else:
-        from_date = _normalize_to_month_first(from_date)
+    target_month = _shift_months(_normalize_to_month_first(_today_kst()), -1)
+    from_date, to_date = resolve_snapshot_range(from_date, to_date)
 
     rows = await repo.find_by_household_and_range(household.id, from_date, to_date)
 
