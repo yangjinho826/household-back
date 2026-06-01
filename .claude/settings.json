@@ -1,3 +1,15 @@
 {
-  "autoMemoryDirectory": "~/.claude/memory/household-back"
+  "autoMemoryDirectory": "~/.claude/memory/household-back",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/notify-discord.sh\""
+          }
+        ]
+      }
+    ]
+  }
 }
