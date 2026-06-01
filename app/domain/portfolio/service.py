@@ -23,7 +23,7 @@ from app.domain.account.repository import AccountRepository
 from app.domain.exchange_rate.enum import CurrencyCode
 from app.domain.exchange_rate.repository import CurrencyRateRepository
 from app.domain.household.model import Household
-from app.domain.portfolio.enum import Market, PortfolioTxType
+from app.domain.portfolio.enum import AssetClass, Market, PortfolioTxType
 from app.domain.portfolio.model import (
     PortfolioItem,
     PortfolioTransaction,
@@ -78,6 +78,7 @@ def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse
         name=item.name,
         code=item.code,
         market=Market(item.market),
+        asset_class=AssetClass(item.asset_class),
         quantity=item.quantity,
         avg_price=item.avg_price,
         current_price=item.current_price,
@@ -166,6 +167,7 @@ async def create_portfolio(
         name=req.name.strip(),
         code=req.code.strip(),
         market=req.market.value,
+        asset_class=req.asset_class.value,
         quantity=Decimal("0.0000"),
         avg_price=Decimal("0.00"),
         current_price=req.current_price,
@@ -246,6 +248,8 @@ async def update_portfolio(
         item.code = req.code.strip()
     if req.market is not None:
         item.market = req.market.value
+    if req.asset_class is not None:
+        item.asset_class = req.asset_class.value
     if req.is_archived is not None:
         item.is_archived = req.is_archived
 

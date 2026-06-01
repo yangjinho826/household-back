@@ -22,6 +22,10 @@ class PortfolioItem(BaseEntity):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     market: Mapped[str] = mapped_column(String(20), nullable=False)
+    # 자산 성격(STOCK/BOND/COMMODITY/...) — market 과 직교. 신규 종목 기본 STOCK.
+    asset_class: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'STOCK'"),
+    )
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     avg_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     current_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
