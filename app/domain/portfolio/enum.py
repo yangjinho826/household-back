@@ -9,16 +9,14 @@ class PortfolioTxType(StrEnum):
 
 
 class AssetClass(StrEnum):
-    """자산 성격 — market(거래소)과 직교하는 축.
+    """자산군 배분 슬라이스 축 — 자산 페이지 배분 파이/추이를 group by 하는 키.
 
-    market 은 "어디서 거래되나", asset_class 는 "무엇이냐". 금을 KRX_KOSPI 에
-    욱여넣던 문제를 해소한다 — 금ETF·금현물 모두 COMMODITY, 주식ETF(KODEX200)는
-    STOCK, 채권ETF는 BOND. 배분 파이는 이 축으로 group by 한다.
-    ETF/현물은 wrapper(형태)일 뿐 asset_class 가 아니다 — 담은 내용물 성격으로 분류.
+    종목(PortfolioItem)은 분류 없이 전부 INVESTMENT 한 덩어리로 집계한다(채권ETF·
+    기타 포함). 실물(COMMODITY=금·원자재)·부동산·연금은 수동자산(ManualAsset)이
+    전용계좌로 roll-up 되어 각 슬라이스를 차지한다. CASH 는 현금성 계좌 잔액.
     """
 
-    STOCK = "STOCK"
-    BOND = "BOND"
+    INVESTMENT = "INVESTMENT"
     COMMODITY = "COMMODITY"
     CASH = "CASH"
     REAL_ESTATE = "REAL_ESTATE"

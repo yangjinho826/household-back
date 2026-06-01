@@ -9,8 +9,12 @@ from app.core.schema import CamelBaseModel
 from app.core.types import Money
 from app.domain.portfolio.enum import AssetClass
 
-# 수동자산이 가질 수 있는 자산 성격 — 투자종목(STOCK 등)과 구분
-_MANUAL_ASSET_CLASSES = {AssetClass.REAL_ESTATE, AssetClass.PENSION}
+# 수동자산이 가질 수 있는 자산 성격 — 종목(INVESTMENT)과 구분되는 실물·부동산·연금
+_MANUAL_ASSET_CLASSES = {
+    AssetClass.REAL_ESTATE,
+    AssetClass.PENSION,
+    AssetClass.COMMODITY,
+}
 
 
 class ManualAssetCreateRequest(CamelBaseModel):

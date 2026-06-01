@@ -25,7 +25,7 @@ class ManualAsset(BaseEntity):
     household_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     account_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    # 자산 성격 — REAL_ESTATE / PENSION (AssetClass 와 동일 문자열)
+    # 자산 성격 — REAL_ESTATE / PENSION / COMMODITY (AssetClass 와 동일 문자열)
     asset_class: Mapped[str] = mapped_column(String(20), nullable=False)
     current_valuation: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     valued_at: Mapped[date] = mapped_column(Date, nullable=False)

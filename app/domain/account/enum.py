@@ -9,4 +9,5 @@ class AccountType(StrEnum):
     INVESTMENT = "INVESTMENT"  # 투자
     REAL_ESTATE = "REAL_ESTATE"  # 부동산 (수동자산 roll-up 전용)
     PENSION = "PENSION"      # 연금 (수동자산 roll-up 전용)
+    COMMODITY = "COMMODITY"  # 금·원자재 (수동자산 roll-up 전용)
     OTHER = "OTHER"          # 기타

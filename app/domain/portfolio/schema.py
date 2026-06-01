@@ -9,7 +9,7 @@ from app.core.pagination import CursorPage
 from app.core.schema import CamelBaseModel
 from app.core.types import Money, Quantity, Rate
 from app.domain.account.schema import AccountResponse
-from app.domain.portfolio.enum import AssetClass, Market, PortfolioTxType
+from app.domain.portfolio.enum import Market, PortfolioTxType
 
 
 class PortfolioValueHistoryByAccountQuery(CamelBaseModel):
@@ -33,7 +33,6 @@ class PortfolioCreateRequest(CamelBaseModel):
     name: str
     code: str = ""
     market: Market
-    asset_class: AssetClass = AssetClass.STOCK
     current_price: Decimal
     account_id: UUID
 
@@ -84,7 +83,6 @@ class PortfolioUpdateRequest(CamelBaseModel):
     name: str | None = None
     code: str | None = None
     market: Market | None = None
-    asset_class: AssetClass | None = None
     is_archived: bool | None = None
 
     @model_validator(mode="after")
@@ -142,7 +140,6 @@ class PortfolioResponse(CamelBaseModel):
     name: str
     code: str
     market: Market
-    asset_class: AssetClass
     quantity: Quantity
     avg_price: Money
     current_price: Money

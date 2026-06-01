@@ -29,6 +29,9 @@ _ROLLUP_ACCOUNT_META: dict[AssetClass, tuple[AccountType, str, str, str]] = {
     AssetClass.PENSION: (
         AccountType.PENSION, "연금", "#EC4899", "pig-money",
     ),
+    AssetClass.COMMODITY: (
+        AccountType.COMMODITY, "금·원자재", "#F59E0B", "coin",
+    ),
 }
 
 

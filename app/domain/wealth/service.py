@@ -57,7 +57,8 @@ def _build_allocation(
 
     - 계좌 현금은 CASH 슬라이스. INVESTMENT 통장은 cash 부분만(종목 평가액은 종목에서),
       그 외 통장은 balance 전체가 현금.
-    - 종목은 asset_class 별 평가액(qty * current_price) 합산.
+    - REAL_ESTATE/PENSION/COMMODITY 전용계좌는 balance 가 해당 슬라이스(수동자산 roll-up).
+    - 종목은 분류 없이 전부 INVESTMENT 슬라이스로 평가액(qty * current_price) 합산.
     """
     slices: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
 
@@ -68,11 +69,13 @@ def _build_allocation(
             slices[AssetClass.REAL_ESTATE.value] += a.balance
         elif a.account_type == AccountType.PENSION:
             slices[AssetClass.PENSION.value] += a.balance
+        elif a.account_type == AccountType.COMMODITY:
+            slices[AssetClass.COMMODITY.value] += a.balance
         else:
             slices[AssetClass.CASH.value] += a.balance
 
     for item in items:
-        slices[item.asset_class] += item.quantity * item.current_price
+        slices[AssetClass.INVESTMENT.value] += item.quantity * item.current_price
 
     return _slices_to_list(slices)
 
@@ -84,11 +87,11 @@ def build_allocation_trend(
 ) -> list[AllocationTrendPoint]:
     """월별 자산군 배분추이 — 박제된 AccountSnapshot + PortfolioValueHistory 재구성.
 
-    - 종목: PVH 의 박제 시점 asset_class 별 valuation 합 (과거 재분류 영향 없음).
+    - 종목: PVH valuation 을 전부 INVESTMENT 슬라이스로 합산(분류 없음).
     - INVESTMENT 계좌 현금: AccountSnapshot.balance − 그 계좌 그달 PVH valuation 합
       (`_calc_balance` 의 balance = cash + valuation 등식 역산).
     - 그 외 계좌(LIVING/SAVINGS/OTHER): balance 전체가 CASH.
-    - REAL_ESTATE/PENSION 전용계좌: balance 가 그달 평가액(roll-up 박제값).
+    - REAL_ESTATE/PENSION/COMMODITY 전용계좌: balance 가 그달 평가액(roll-up 박제값).
     """
     account_type_map = {a.id: a.account_type for a in accounts}
 
@@ -102,7 +105,7 @@ def build_allocation_trend(
 
     for h in portfolio_histories:
         pvh_by_account[(h.snapshot_date, h.account_id)] += h.valuation
-        trend[h.snapshot_date][h.asset_class] += h.valuation
+        trend[h.snapshot_date][AssetClass.INVESTMENT.value] += h.valuation
 
     for s in account_snapshots:
         account_type = account_type_map.get(s.account_id)
@@ -111,6 +114,8 @@ def build_allocation_trend(
             month[AssetClass.REAL_ESTATE.value] += s.balance
         elif account_type == AccountType.PENSION:
             month[AssetClass.PENSION.value] += s.balance
+        elif account_type == AccountType.COMMODITY:
+            month[AssetClass.COMMODITY.value] += s.balance
         elif account_type == AccountType.INVESTMENT:
             cash = s.balance - pvh_by_account[(s.snapshot_date, s.account_id)]
             month[AssetClass.CASH.value] += cash
