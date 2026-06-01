@@ -22,6 +22,7 @@ from app.domain.account.schema import (
 )
 from app.domain.account_snapshot.repository import AccountSnapshotRepository
 from app.domain.household.model import Household
+from app.domain.manual_asset.repository import ManualAssetRepository
 from app.domain.portfolio.repository import (
     PortfolioItemRepository,
     PortfolioTransactionRepository,
@@ -47,6 +48,11 @@ async def _calc_balance(
     tx_repo: TransactionRepository, account: Account, db: AsyncSession,
 ) -> BalanceSummary:
     """통장 balance 계산. INVESTMENT 통장이면 portfolio summary 도 같이 반환."""
+    # 부동산·연금 전용계좌 — 수동자산 평가액 합이 곧 balance (거래/현금 없음)
+    if account.account_type in (AccountType.REAL_ESTATE, AccountType.PENSION):
+        total = await ManualAssetRepository(db).sum_valuation_by_account(account.id)
+        return BalanceSummary(balance=total)
+
     sums = await tx_repo.sum_for_account(account.id)
     cash = (
         account.start_balance

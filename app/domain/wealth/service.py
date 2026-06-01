@@ -39,6 +39,10 @@ def _build_allocation(
     for a in accounts:
         if a.account_type == AccountType.INVESTMENT:
             slices[AssetClass.CASH.value] += a.cash or Decimal("0")
+        elif a.account_type == AccountType.REAL_ESTATE:
+            slices[AssetClass.REAL_ESTATE.value] += a.balance
+        elif a.account_type == AccountType.PENSION:
+            slices[AssetClass.PENSION.value] += a.balance
         else:
             slices[AssetClass.CASH.value] += a.balance
 
