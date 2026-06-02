@@ -1,12 +1,14 @@
 import logging
+from calendar import monthrange
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
+from app.domain.account.enum import AccountType
 from app.domain.account.repository import AccountRepository
 from app.domain.category.repository import CategoryRepository
 from app.domain.household.model import Household
@@ -17,6 +19,8 @@ from app.domain.transaction.repository import (
     TransactionRepository,
 )
 from app.domain.transaction.schema import (
+    AccountLedgerItem,
+    AccountLedgerPage,
     CalendarDay,
     CalendarFullResponse,
     CalendarResponse,
@@ -27,6 +31,10 @@ from app.domain.transaction.schema import (
     TransactionUpdateRequest,
 )
 from app.domain.user.model import User
+
+# running balance 를 지원하는 거래계좌 — 현금흐름 잔액이 곧 balance.
+# INVESTMENT(평가액 섞임)·REAL_ESTATE/PENSION/COMMODITY(거래 없음)는 제외.
+_LEDGER_ACCOUNT_TYPES = (AccountType.LIVING, AccountType.SAVINGS, AccountType.OTHER)
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +128,120 @@ def _build_response(
         paid_by_user_id=tx.paid_by_user_id,
         fixed_expense_id=tx.fixed_expense_id,
         memo=tx.memo,
+    )
+
+
+def _signed_amount(tx: Transaction, account_id: UUID) -> Decimal:
+    """이 계좌 관점의 부호 금액. 이체는 출금계좌 −, 입금계좌 +."""
+    if tx.tx_type == TxType.TRANSFER and tx.to_account_id == account_id:
+        return tx.amount  # 이체 입금
+    if tx.tx_type == TxType.INCOME:
+        return tx.amount
+    return -tx.amount  # EXPENSE/FIXED_EXPENSE/이체 출금
+
+
+def _split_ledger_cursor(cursor: str | None) -> tuple[str | None, Decimal | None]:
+    """ledger 커서 = "{tx_date}|{frst_reg_dt}|{id}|{carry_balance}".
+
+    carry_balance 는 다음 페이지 첫 행의 시작 잔액(이전 페이지 끝에서 이어받음).
+    list_by_cursor 가 쓰는 정렬 커서는 앞 3-tuple 뿐이라 carry 를 떼어 분리한다.
+    """
+    if not cursor:
+        return None, None
+    base, _, carry_str = cursor.rpartition("|")
+    if not base:
+        return cursor, None
+    try:
+        return base, Decimal(carry_str)
+    except (InvalidOperation, ValueError):
+        return cursor, None
+
+
+async def list_account_ledger(
+    db: AsyncSession,
+    household: Household,
+    account_id: UUID,
+    cursor: str | None,
+    limit: int,
+    year: int | None = None,
+    month: int | None = None,
+) -> AccountLedgerPage:
+    """계좌별 거래 이력 — 각 행에 running balance(거래 후 잔액).
+
+    잔액은 "기준 잔액에서 desc 로 역산". 첫 페이지 첫 행의 잔액 = 그 시점까지의
+    누적 현금흐름 잔액, 한 칸 옛 거래로 내려갈 때마다 위 행의 signed_amount 를
+    빼서 그 아래 잔액을 만든다. 페이지 경계는 carry 를 커서에 실어 이어붙인다.
+
+    year+month 를 주면 그 달 거래만(거래 탭). 기준점은 "그 달 말까지의 누적 잔액"
+    이라 미래 달 거래와 무관하게 그 달 안에서 잔액이 맞는다. 없으면 전체(계좌 상세).
+    """
+    repo = TransactionRepository(db)
+    account = await AccountRepository(db).find_by_id(account_id)
+    if account is None or account.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    if account.account_type not in _LEDGER_ACCOUNT_TYPES:
+        raise CustomException(ErrorCode.BAD_REQUEST)
+
+    tx_cursor, carry = _split_ledger_cursor(cursor)
+    if year is not None and month is not None:
+        f = TransactionFilter(account_id=account_id, year=year, month=month)
+        balance_to_date: date | None = date(year, month, monthrange(year, month)[1])
+    else:
+        f = TransactionFilter(account_id=account_id)
+        balance_to_date = None
+    rows = await repo.list_by_cursor(household.id, f, tx_cursor, limit)
+    total = await repo.count(household.id, f)
+
+    has_next = len(rows) > limit
+    items_rows = rows[:limit]
+
+    # 시작 잔액 — 첫 페이지면 기준 시점까지의 누적 현금흐름 잔액, 이어지는 페이지면 carry.
+    if carry is not None:
+        running = carry
+    else:
+        sums = await repo.sum_for_account(account_id, to_date=balance_to_date)
+        running = (
+            account.start_balance
+            + sums["income"]
+            - sums["expense"]
+            - sums["transfer_out"]
+            + sums["transfer_in"]
+        )
+
+    account_ids = {r.account_id for r in items_rows}
+    account_ids.update({r.to_account_id for r in items_rows if r.to_account_id})
+    category_ids = {r.category_id for r in items_rows if r.category_id}
+    accounts = await AccountRepository(db).find_by_ids(list(account_ids))
+    categories = await CategoryRepository(db).find_by_ids(list(category_ids))
+    account_map = {a.id: a for a in accounts}
+    category_map = {c.id: c for c in categories}
+
+    items: list[AccountLedgerItem] = []
+    for r in items_rows:
+        signed = _signed_amount(r, account_id)
+        base = _build_response(r, account_map, category_map)
+        items.append(
+            AccountLedgerItem(
+                **base.model_dump(),
+                signed_amount=signed,
+                balance_after=running,
+            )
+        )
+        running -= signed  # 한 칸 옛 거래의 잔액
+
+    next_cursor = None
+    if has_next:
+        last = items_rows[-1]
+        next_cursor = (
+            f"{last.tx_date.isoformat()}|{last.frst_reg_dt.isoformat()}"
+            f"|{last.id}|{running}"
+        )
+
+    return AccountLedgerPage(
+        items=items,
+        next_cursor=next_cursor,
+        has_next=has_next,
+        total_count=total,
     )
 
 

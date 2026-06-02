@@ -124,8 +124,22 @@ class TransactionRepository:
         )
         return result.scalar() or 0
 
-    async def sum_for_account(self, account_id: UUID) -> dict[str, Decimal]:
-        """통장별 거래 합계 — balance 계산용"""
+    async def sum_for_account(
+        self, account_id: UUID, to_date: date | None = None,
+    ) -> dict[str, Decimal]:
+        """통장별 거래 합계 — balance 계산용.
+
+        to_date 를 주면 그 날짜까지의 누적(running balance 기준점용). 없으면 전체.
+        """
+        conds = [
+            Transaction.data_stat_cd == DataStatus.ACTIVE,
+            or_(
+                Transaction.account_id == account_id,
+                Transaction.to_account_id == account_id,
+            ),
+        ]
+        if to_date is not None:
+            conds.append(Transaction.tx_date <= to_date)
         result = await self.db.execute(
             select(
                 Transaction.tx_type,
@@ -133,15 +147,7 @@ class TransactionRepository:
                 Transaction.to_account_id,
                 func.sum(Transaction.amount).label("total"),
             )
-            .where(
-                and_(
-                    Transaction.data_stat_cd == DataStatus.ACTIVE,
-                    or_(
-                        Transaction.account_id == account_id,
-                        Transaction.to_account_id == account_id,
-                    ),
-                )
-            )
+            .where(and_(*conds))
             .group_by(
                 Transaction.tx_type,
                 Transaction.account_id,
