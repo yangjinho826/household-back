@@ -10,7 +10,7 @@
 """
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
@@ -466,6 +466,16 @@ def _default_date_range(
     return from_date, to_date
 
 
+def _month_end(d: date) -> date:
+    """월 1일로 정규화된 날짜의 그 달 말일.
+
+    realized_pnl 쿼리는 `tx_date <= to_date`(일 단위)인데 _default_date_range 가
+    to_date 를 월 1일로 정규화하므로, 그 달 전체를 포함하려면 말일까지 넓혀야 한다.
+    """
+    nxt = date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
+    return nxt - timedelta(days=1)
+
+
 def _to_history_point(row: PortfolioValueHistory) -> PortfolioValueHistoryPoint:
     return PortfolioValueHistoryPoint(
         snapshot_date=row.snapshot_date,
@@ -494,9 +504,8 @@ async def get_realized_pnl_by_item(
         raise CustomException(ErrorCode.NOT_FOUND)
 
     from_date, to_date = _default_date_range(from_date, to_date)
-    # to_date 는 월 1일로 정규화되므로 그 달 말일까지 포함하도록 다음 달 1일 직전까지
     sells = await PortfolioTransactionRepository(db).find_sell_txs_by_item(
-        item_id, from_date, date.today(),
+        item_id, from_date, _month_end(to_date),
     )
 
     rows: list[RealizedPnlRow] = []
@@ -548,7 +557,7 @@ async def get_realized_pnl_by_account(
     """
     from_date, to_date = _default_date_range(from_date, to_date)
     sells = await PortfolioTransactionRepository(db).find_sell_txs_by_account(
-        account_id, household.id, from_date, date.today(),
+        account_id, household.id, from_date, _month_end(to_date),
     )
 
     rows: list[RealizedPnlRow] = []
