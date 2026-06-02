@@ -1,5 +1,5 @@
 from calendar import monthrange
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -75,15 +75,23 @@ class TransactionRepository:
     def _cursor_after(cursor: str | None):
         if not cursor:
             return None
+        # 정렬 키(tx_date desc, frst_reg_dt desc, id desc)와 동일한 3-tuple 비교.
+        # id 가 uuid4(랜덤)라 tie-breaker 일 뿐, 같은 날 순서는 frst_reg_dt 가 결정.
         try:
-            date_str, id_str = cursor.split("|", 1)
+            date_str, reg_str, id_str = cursor.split("|", 2)
             cur_date = date.fromisoformat(date_str)
+            cur_reg = datetime.fromisoformat(reg_str)
             cur_id = UUID(id_str)
         except (ValueError, AttributeError):
             return None
         return or_(
             Transaction.tx_date < cur_date,
-            and_(Transaction.tx_date == cur_date, Transaction.id < cur_id),
+            and_(Transaction.tx_date == cur_date, Transaction.frst_reg_dt < cur_reg),
+            and_(
+                Transaction.tx_date == cur_date,
+                Transaction.frst_reg_dt == cur_reg,
+                Transaction.id < cur_id,
+            ),
         )
 
     async def list_by_cursor(
@@ -100,7 +108,11 @@ class TransactionRepository:
         result = await self.db.execute(
             select(Transaction)
             .where(and_(*conds))
-            .order_by(Transaction.tx_date.desc(), Transaction.id.desc())
+            .order_by(
+                Transaction.tx_date.desc(),
+                Transaction.frst_reg_dt.desc(),
+                Transaction.id.desc(),
+            )
             .limit(limit + 1)
         )
         return list(result.scalars().all())

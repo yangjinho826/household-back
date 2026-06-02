@@ -83,7 +83,9 @@ async def list_transactions(
     next_cursor = None
     if has_next:
         last = items_rows[-1]
-        next_cursor = f"{last.tx_date.isoformat()}|{last.id}"
+        next_cursor = (
+            f"{last.tx_date.isoformat()}|{last.frst_reg_dt.isoformat()}|{last.id}"
+        )
 
     return TransactionListResponse(
         items=items,
