@@ -256,6 +256,33 @@ class PortfolioTransactionRepository:
         )
         return list(result.scalars().all())
 
+    async def find_sell_txs_by_account(
+        self, account_id: UUID, household_id: UUID, from_date: date, to_date: date,
+    ) -> list[PortfolioTransaction]:
+        """계좌의 기간 내 매도 거래 — 계좌 누적 매매손익 집계용. 최신순.
+
+        전량매도로 종목(item)이 soft delete 돼도 매도 거래는 ACTIVE 로 남아 포함된다.
+        household_id 를 함께 걸어 소유권을 보장(남의 계좌 id 면 빈 결과).
+        """
+        result = await self.db.execute(
+            select(PortfolioTransaction)
+            .where(
+                and_(
+                    PortfolioTransaction.account_id == account_id,
+                    PortfolioTransaction.household_id == household_id,
+                    PortfolioTransaction.pt_type == PortfolioTxType.SELL,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                    PortfolioTransaction.tx_date >= from_date,
+                    PortfolioTransaction.tx_date <= to_date,
+                )
+            )
+            .order_by(
+                PortfolioTransaction.tx_date.desc(),
+                PortfolioTransaction.frst_reg_dt.desc(),
+            )
+        )
+        return list(result.scalars().all())
+
     @staticmethod
     def _cursor_after(cursor: str | None):
         """tx_date DESC, id DESC 정렬 기준 cursor 조건 — transaction 패턴 그대로"""

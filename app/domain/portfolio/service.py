@@ -539,6 +539,59 @@ async def get_realized_pnl_by_item(
     return RealizedPnlResponse(summary=summary, rows=rows)
 
 
+async def get_realized_pnl_by_account(
+    db: AsyncSession,
+    household: Household,
+    account_id: UUID,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> RealizedPnlResponse:
+    """계좌 누적 매매손익 — 기간 내 계좌의 모든 종목 매도 건별 실현손익 + 요약.
+
+    전량매도로 종목이 사라져도 매도 거래는 남아 집계에 포함된다(조회 사각지대 해소).
+    여러 종목이 섞이므로 row 에 종목명(name)을 채운다. 기간 미지정 시 최근 12개월.
+    구버전 SELL(realized=NULL) 은 0 으로 간주해 합계 왜곡 방지.
+    """
+    from_date, to_date = _default_date_range(from_date, to_date)
+    sells = await PortfolioTransactionRepository(db).find_sell_txs_by_account(
+        account_id, household.id, from_date, date.today(),
+    )
+
+    rows: list[RealizedPnlRow] = []
+    total_realized = Decimal("0.00")
+    total_cost = Decimal("0.00")
+    total_sell = Decimal("0.00")
+    for tx in sells:
+        pnl = tx.realized_pnl or Decimal("0.00")
+        cost = tx.realized_cost_basis or Decimal("0.00")
+        rate = (pnl / cost * 100) if cost > 0 else Decimal("0.00")
+        rows.append(
+            RealizedPnlRow(
+                tx_id=tx.id,
+                tx_date=tx.tx_date,
+                name=tx.name,
+                quantity=tx.quantity,
+                sell_price=tx.price,
+                realized_pnl=pnl,
+                realized_rate=rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            )
+        )
+        total_realized += pnl
+        total_cost += cost
+        total_sell += tx.quantity * tx.price
+
+    total_rate = (
+        (total_realized / total_cost * 100) if total_cost > 0 else Decimal("0.00")
+    )
+    summary = RealizedPnlSummary(
+        total_realized=total_realized,
+        total_rate=total_rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        sell_amount=total_sell,
+        buy_amount=total_cost,
+    )
+    return RealizedPnlResponse(summary=summary, rows=rows)
+
+
 async def get_value_history_by_account(
     db: AsyncSession,
     household: Household,

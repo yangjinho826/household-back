@@ -174,6 +174,7 @@ class RealizedPnlRow(CamelBaseModel):
 
     tx_id: UUID
     tx_date: date
+    name: str | None = None  # 계좌 단위 응답에서 종목명 (종목 단위 응답은 None)
     quantity: Quantity
     sell_price: Money
     realized_pnl: Money
