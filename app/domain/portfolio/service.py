@@ -316,12 +316,16 @@ async def sell(
     return _build_response(item, {a.id: a for a in accounts})
 
 
-def _recompute_realized_pnl(txs: list[PortfolioTransaction]) -> None:
+def _recompute_realized_pnl(
+    txs: list[PortfolioTransaction],
+) -> tuple[Decimal, Decimal]:
     """거래를 시간순 replay 하며 각 SELL 의 실현손익을 그 시점 평단으로 재박제.
 
     거래 수정/삭제로 평단이 바뀌면 과거 SELL 의 박제값이 틀어지므로,
     매도시점 누적 이동평균(running_avg)으로 다시 계산해 SELL row 를 갱신한다.
     txs 의 price 는 이미 KRW 박제값이라 환율 변환 불필요.
+
+    반환: replay 종료 시점의 (남은 수량, 남은 원가) — 호출부의 평단 재계산용.
     """
     running_qty = Decimal("0")
     running_cost = Decimal("0")
@@ -340,39 +344,29 @@ def _recompute_realized_pnl(txs: list[PortfolioTransaction]) -> None:
             # 매도는 평단 불변 — 수량/원가를 평단 비율로 차감 (running_avg 유지)
             running_cost -= running_avg * t.quantity
             running_qty -= t.quantity
+    return running_qty, running_cost
 
 
 async def _recalc_item_from_transactions(
     db: AsyncSession, item: PortfolioItem,
 ) -> None:
-    """종목의 활성 거래 합산 → quantity / avg_price 재계산.
+    """종목의 활성 거래 시간순 replay → quantity / avg_price 재계산.
 
-    매수 가중평균만 avg_price 에 반영. 매도는 수량만 차감 (avg 영향 X).
-    매도가 매수보다 많으면 BAD_REQUEST.
+    이동평균: 매도 시점 평단으로 원가를 차감하므로 매도 후 재매수도 정확히
+    반영된다(단순 전체매수합/전체매수량은 평단을 왜곡). 매도 실현손익 재박제와
+    같은 replay 를 공유한다. 매도가 매수보다 많으면 BAD_REQUEST.
     """
     pt_repo = PortfolioTransactionRepository(db)
     txs = await pt_repo.find_active_by_item_id(item.id)
 
-    total_buy_qty = Decimal("0")
-    total_buy_cost = Decimal("0")
-    total_sell_qty = Decimal("0")
-    for t in txs:
-        if t.pt_type == PortfolioTxType.BUY:
-            total_buy_qty += t.quantity
-            total_buy_cost += t.quantity * t.price
-        elif t.pt_type == PortfolioTxType.SELL:
-            total_sell_qty += t.quantity
-
-    remaining = total_buy_qty - total_sell_qty
-    if remaining < 0:
+    remaining_qty, remaining_cost = _recompute_realized_pnl(txs)
+    if remaining_qty < 0:
         raise CustomException(ErrorCode.BAD_REQUEST)
 
-    item.quantity = remaining
+    item.quantity = remaining_qty
     item.avg_price = (
-        total_buy_cost / total_buy_qty if total_buy_qty > 0 else Decimal("0.00")
+        remaining_cost / remaining_qty if remaining_qty > 0 else Decimal("0.00")
     )
-    # 평단이 바뀌었을 수 있으니 매도 실현손익도 시간순으로 재박제
-    _recompute_realized_pnl(txs)
     await db.flush()
 
 
