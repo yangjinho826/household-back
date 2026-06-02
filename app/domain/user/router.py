@@ -42,9 +42,10 @@ async def search(
 @router.get("/{user_id}")
 async def detail(
     user_id: UUID,
+    current_user: CurrentUser,  # noqa: ARG001 — 인증 가드용 (이메일 노출 방지)
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[UserResponse]:
-    """사용자 상세 조회"""
+    """사용자 상세 조회 — 인증 필요"""
     response = await service.detail_user(db, user_id)
     return ApiResponse.ok(data=response)
 
