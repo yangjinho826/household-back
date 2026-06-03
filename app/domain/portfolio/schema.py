@@ -12,6 +12,14 @@ from app.domain.account.schema import AccountResponse
 from app.domain.portfolio.enum import Market, PortfolioTxType
 
 
+class PortfolioRefreshResponse(CamelBaseModel):
+    """수동 시세 갱신 결과 — 갱신/실패 종목 수 + 영향받은 row 수."""
+
+    fetched: int
+    skipped: int
+    updated_rows: int
+
+
 class PortfolioValueHistoryByAccountQuery(CamelBaseModel):
     """통장 단위 종목별 평가액 추이 쿼리. accountId 필수, 기간 옵션."""
 

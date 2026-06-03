@@ -14,7 +14,9 @@ from app.domain.category.schema import (
     CategoryResponse,
     CategoryUpdateRequest,
 )
+from app.domain.fixed.repository import FixedRepository
 from app.domain.household.model import Household
+from app.domain.transaction.repository import TransactionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +157,12 @@ async def delete_category(
     category = await repo.find_by_id(category_id)
     if not category or category.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
+
+    # 자식 존재 가드 — 이 카테고리를 쓰는 활성 거래/고정비가 있으면 삭제 차단(분류 무결성).
+    if await TransactionRepository(db).exists_active_by_category_id(category_id):
+        raise CustomException(ErrorCode.CATEGORY_IN_USE)
+    if await FixedRepository(db).exists_active_by_category_id(category_id):
+        raise CustomException(ErrorCode.CATEGORY_IN_USE)
 
     category.data_stat_cd = DataStatus.DELETED
     await db.flush()

@@ -11,6 +11,7 @@ import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,11 +58,18 @@ async def _fetch_one(
     return price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-async def refresh(session: AsyncSession, markets: list[Market]) -> RefreshResult:
-    """주어진 시장들의 모든 활성 portfolio_items.current_price 자동 갱신.
+async def refresh(
+    session: AsyncSession,
+    markets: list[Market],
+    household_id: UUID | None = None,
+) -> RefreshResult:
+    """주어진 시장들의 활성 portfolio_items.current_price 갱신.
+
+    household_id 가 없으면 전 가계부(스케줄 잡), 있으면 그 가계부 보유 종목만 fetch(수동 갱신).
+    가격은 시장 공통이라 bulk update 는 매칭되는 전 가계부 row 에 적용.
 
     1. USD 시장이 포함되면 최신 환율 fetch — 없으면 USD 시장 제외
-    2. (code, market) DISTINCT 추출 — 가계부 N개여도 야후 호출은 종목 수만큼
+    2. (code, market) DISTINCT 추출
     3. 청크 병렬 (_CHUNK_SIZE 개씩 asyncio.gather), 청크 사이 sleep
     4. 가격 캐시 모은 후 bulk update
     5. fetch 실패는 per-item skip + 로그 (yahoo_client 내부 retry 1회)
@@ -87,7 +95,12 @@ async def refresh(session: AsyncSession, markets: list[Market]) -> RefreshResult
             logger.info("USD 환산 환율 적용 (%s)", fx_rate)
 
     repo = PortfolioItemRepository(session)
-    pairs = await repo.find_active_distinct_code_market_by_markets(markets)
+    if household_id is None:
+        pairs = await repo.find_active_distinct_code_market_by_markets(markets)
+    else:
+        pairs = await repo.find_active_distinct_code_market_by_household_and_markets(
+            household_id, markets,
+        )
 
     prices_to_apply: dict[tuple[str, Market], Decimal] = {}
     fetched = 0

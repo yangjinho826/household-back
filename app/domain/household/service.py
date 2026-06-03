@@ -2,17 +2,29 @@ import logging
 from datetime import datetime, date
 from uuid import UUID
 
+from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.pagination import CursorPage
+from app.domain.account.model import Account
+from app.domain.account_snapshot.model import AccountSnapshot
+from app.domain.category.model import Category
+from app.domain.fixed.model import FixedExpense
 from app.domain.household.enum import HouseholdRole
 from app.domain.household.model import Household, HouseholdMember
 from app.domain.household.repository import (
     HouseholdMemberRepository,
     HouseholdRepository,
 )
+from app.domain.manual_asset.model import ManualAsset
+from app.domain.portfolio.model import (
+    PortfolioItem,
+    PortfolioTransaction,
+    PortfolioValueHistory,
+)
+from app.domain.transaction.model import Transaction
 from app.domain.household.schema import (
     HouseholdCreateRequest,
     HouseholdListResponse,
@@ -119,10 +131,54 @@ async def update_household(
     return _build_response(household, HouseholdRole.OWNER)
 
 
+# 가계부 삭제 시 함께 soft-delete 할 자식 (모두 household_id 보유).
+# account_snapshots 는 household_id 가 없어 account_id 기반으로 별도 처리.
+_CHILD_MODELS_WITH_HOUSEHOLD_ID = (
+    Account,
+    Category,
+    Transaction,
+    PortfolioItem,
+    PortfolioTransaction,
+    PortfolioValueHistory,
+    FixedExpense,
+    ManualAsset,
+    HouseholdMember,
+)
+
+
+async def _cascade_soft_delete_children(db: AsyncSession, household_id: UUID) -> None:
+    """가계부의 모든 활성 자식을 soft-delete. soft-delete 라 순서 무관(FK cascade 아님)."""
+    for model in _CHILD_MODELS_WITH_HOUSEHOLD_ID:
+        await db.execute(
+            update(model)
+            .where(
+                and_(
+                    model.household_id == household_id,
+                    model.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .values(data_stat_cd=DataStatus.DELETED)
+        )
+    # account_snapshots — household 의 통장 id 들로 (통장은 위에서 이미 soft-delete 됐지만
+    # 행은 남아있어 household_id 매칭 select 는 그대로 동작)
+    await db.execute(
+        update(AccountSnapshot)
+        .where(
+            and_(
+                AccountSnapshot.account_id.in_(
+                    select(Account.id).where(Account.household_id == household_id)
+                ),
+                AccountSnapshot.data_stat_cd == DataStatus.ACTIVE,
+            )
+        )
+        .values(data_stat_cd=DataStatus.DELETED)
+    )
+
+
 async def delete_household(
     db: AsyncSession, household_id: UUID, current_user: User,
 ) -> None:
-    """가계부 soft delete (owner 만)"""
+    """가계부 soft delete (owner 만) — 모든 자식도 함께 cascade soft-delete."""
     repo = HouseholdRepository(db)
     household = await repo.find_by_id(household_id)
     if not household:
@@ -130,9 +186,10 @@ async def delete_household(
     if household.owner_id != current_user.id:
         raise CustomException(ErrorCode.HOUSEHOLD_NOT_OWNER)
 
+    await _cascade_soft_delete_children(db, household_id)
     household.data_stat_cd = DataStatus.DELETED
     await db.flush()
-    logger.info("가계부 삭제 (household_id=%s)", household_id)
+    logger.info("가계부 cascade 삭제 (household_id=%s)", household_id)
 
 
 def _build_member_response(

@@ -37,6 +37,13 @@ class ErrorCode(Enum):
 
     # 포트폴리오 (PT)
     STOCK_LOOKUP_FAILED = (404, "PT001", "종목 조회에 실패했습니다.")
+    PORTFOLIO_HAS_HOLDINGS = (400, "PT002", "보유 중인 종목은 삭제할 수 없습니다. 먼저 전량 매도하세요.")
+
+    # 통장 (AC)
+    ACCOUNT_HAS_DEPENDENTS = (400, "AC001", "거래·종목이 연결된 통장은 삭제할 수 없습니다.")
+
+    # 카테고리 (CT)
+    CATEGORY_IN_USE = (400, "CT001", "사용 중인 카테고리는 삭제할 수 없습니다.")
 
     # 멱등성 (ID)
     IDEMPOTENCY_KEY_CONFLICT = (422, "ID001", "다른 요청에 사용된 키입니다.")

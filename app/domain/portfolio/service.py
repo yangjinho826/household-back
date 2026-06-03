@@ -248,6 +248,9 @@ async def update_portfolio(
     if req.market is not None:
         item.market = req.market.value
     if req.is_archived is not None:
+        # 프론트 "삭제"는 보관(archive)으로 동작 — 보유수량>0 이면 차단(전량 매도 후 가능).
+        if req.is_archived and item.quantity > 0:
+            raise CustomException(ErrorCode.PORTFOLIO_HAS_HOLDINGS)
         item.is_archived = req.is_archived
 
     await db.flush()
@@ -427,14 +430,39 @@ async def delete_portfolio_transaction(
 async def delete_portfolio(
     db: AsyncSession, household: Household, item_id: UUID,
 ) -> None:
-    """종목 soft delete (data_stat_cd='99'). value_history row 는 보존"""
+    """종목 soft delete (data_stat_cd='99'). value_history row 는 보존.
+
+    보유수량>0 이면 차단 — 먼저 전량 매도해야 삭제 가능(전량 매도는 qty=0 라 통과).
+    """
     repo = PortfolioItemRepository(db)
     item = await repo.find_by_id(item_id)
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
+    if item.quantity > 0:
+        raise CustomException(ErrorCode.PORTFOLIO_HAS_HOLDINGS)
     item.data_stat_cd = DataStatus.DELETED
     await db.flush()
     logger.info("종목 삭제 (item_id=%s)", item_id)
+
+
+# 수동 시세 갱신 대상 시장 — OTHER(야후 미지원) 제외.
+_REFRESH_MARKETS = [
+    Market.KRX_KOSPI,
+    Market.KRX_KOSDAQ,
+    Market.NASDAQ,
+    Market.NYSE,
+]
+
+
+async def refresh_prices_for_household(
+    db: AsyncSession, household: Household,
+) -> "RefreshResult":
+    """이 가계부가 보유한 종목들의 current_price 를 야후로 즉시 갱신(수동 새로고침 버튼)."""
+    from app.domain.market_price import service as market_price_service
+
+    return await market_price_service.refresh(
+        db, _REFRESH_MARKETS, household_id=household.id,
+    )
 
 
 async def get_portfolio_detail(

@@ -54,6 +54,18 @@ class PortfolioItemRepository:
         )
         return result.scalar() or 0
 
+    async def count_active_by_account_id(self, account_id: UUID) -> int:
+        """통장 삭제 가드용 — 이 통장에 연결된 활성 종목 수"""
+        result = await self.db.execute(
+            select(func.count(PortfolioItem.id)).where(
+                and_(
+                    PortfolioItem.account_id == account_id,
+                    PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+        )
+        return result.scalar() or 0
+
     async def find_active_by_account_id(self, account_id: UUID) -> list[PortfolioItem]:
         result = await self.db.execute(
             select(PortfolioItem)
@@ -117,6 +129,26 @@ class PortfolioItemRepository:
             select(PortfolioItem.code, PortfolioItem.market)
             .where(
                 and_(
+                    PortfolioItem.market.in_([m.value for m in markets]),
+                    PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
+                    PortfolioItem.is_archived.is_(False),
+                )
+            )
+            .distinct()
+        )
+        return [(code, Market(market)) for code, market in result.all()]
+
+    async def find_active_distinct_code_market_by_household_and_markets(
+        self, household_id: UUID, markets: list[Market],
+    ) -> list[tuple[str, Market]]:
+        """특정 가계부가 보유한 (code, market) DISTINCT — 수동 시세 갱신 야후 호출 단위.
+        가격 자체는 시장 공통이라 bulk update 는 전 가계부에 적용되지만, fetch 대상은
+        이 가계부 보유 종목으로 한정해 야후 호출을 최소화한다."""
+        result = await self.db.execute(
+            select(PortfolioItem.code, PortfolioItem.market)
+            .where(
+                and_(
+                    PortfolioItem.household_id == household_id,
                     PortfolioItem.market.in_([m.value for m in markets]),
                     PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
                     PortfolioItem.is_archived.is_(False),

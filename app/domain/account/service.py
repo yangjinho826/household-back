@@ -258,6 +258,13 @@ async def delete_account(
     if not account or account.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
+    # 자식 존재 가드 — 거래(출금/입금 양방향) 또는 종목이 연결돼 있으면 삭제 차단.
+    # 이체는 양쪽 통장을 참조하므로 cascade 대신 차단이 안전(상대 통장 잔액 보호).
+    if await TransactionRepository(db).exists_active_by_account_id(account_id):
+        raise CustomException(ErrorCode.ACCOUNT_HAS_DEPENDENTS)
+    if await PortfolioItemRepository(db).count_active_by_account_id(account_id) > 0:
+        raise CustomException(ErrorCode.ACCOUNT_HAS_DEPENDENTS)
+
     account.data_stat_cd = DataStatus.DELETED
     await db.flush()
     logger.info("통장 삭제 (account_id=%s)", account_id)

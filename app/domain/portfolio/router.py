@@ -17,6 +17,7 @@ from app.domain.portfolio.schema import (
     PortfolioFormOptionsResponse,
     PortfolioLookupResponse,
     PortfolioOverviewResponse,
+    PortfolioRefreshResponse,
     PortfolioResponse,
     PortfolioSellRequest,
     PortfolioTxPage,
@@ -148,6 +149,22 @@ async def lookup_stock(
     USD 시장은 KRW 로 환산해 응답."""
     response = await service.lookup_stock(db, market, code)
     return ApiResponse.ok(data=response)
+
+
+@router.post("/refresh-prices")
+async def refresh_prices(
+    household: CurrentHousehold,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PortfolioRefreshResponse]:
+    """이 가계부 보유 종목들의 현재가를 야후로 즉시 갱신(수동 새로고침)."""
+    result = await service.refresh_prices_for_household(db, household)
+    return ApiResponse.ok(
+        data=PortfolioRefreshResponse(
+            fetched=result.fetched,
+            skipped=result.skipped,
+            updated_rows=result.updated_rows,
+        )
+    )
 
 
 @router.post("/create")

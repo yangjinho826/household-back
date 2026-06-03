@@ -124,6 +124,38 @@ class TransactionRepository:
         )
         return result.scalar() or 0
 
+    async def exists_active_by_account_id(self, account_id: UUID) -> bool:
+        """이 통장을 출금처/입금처로 쓰는 활성 거래가 있는가 — 통장 삭제 가드용.
+        이체는 account_id·to_account_id 양방향 참조라 둘 다 검사."""
+        result = await self.db.execute(
+            select(Transaction.id)
+            .where(
+                and_(
+                    Transaction.data_stat_cd == DataStatus.ACTIVE,
+                    or_(
+                        Transaction.account_id == account_id,
+                        Transaction.to_account_id == account_id,
+                    ),
+                )
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def exists_active_by_category_id(self, category_id: UUID) -> bool:
+        """이 카테고리를 쓰는 활성 거래가 있는가 — 카테고리 삭제 가드용."""
+        result = await self.db.execute(
+            select(Transaction.id)
+            .where(
+                and_(
+                    Transaction.data_stat_cd == DataStatus.ACTIVE,
+                    Transaction.category_id == category_id,
+                )
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def sum_for_account(
         self, account_id: UUID, to_date: date | None = None,
     ) -> dict[str, Decimal]:
