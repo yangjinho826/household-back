@@ -79,7 +79,9 @@ jobs:
           script: |
             set -e
             cd ~/household/household-back
-            git pull origin main
+            # 서버 작업 트리는 main 을 그대로 따라가는 read-only 미러.
+            # 누가 파일을 직접 고쳐 pull 이 충돌나는 걸 막으려고 강제로 main 에 맞춘다.
+            git fetch origin main && git reset --hard origin/main
             docker compose pull app
 
             # compose 가 rename 도중 이탈해서 남은 stuck 컨테이너 정리.
