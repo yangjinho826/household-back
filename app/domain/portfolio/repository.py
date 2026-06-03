@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
@@ -234,6 +234,55 @@ class PortfolioTransactionRepository:
         self.db.add(tx)
         await self.db.flush()
 
+    async def find_sell_txs_by_item(
+        self, item_id: UUID, from_date: date, to_date: date,
+    ) -> list[PortfolioTransaction]:
+        """종목의 기간 내 매도 거래 — 매매손익 집계용. 최신순."""
+        result = await self.db.execute(
+            select(PortfolioTransaction)
+            .where(
+                and_(
+                    PortfolioTransaction.portfolio_item_id == item_id,
+                    PortfolioTransaction.pt_type == PortfolioTxType.SELL,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                    PortfolioTransaction.tx_date >= from_date,
+                    PortfolioTransaction.tx_date <= to_date,
+                )
+            )
+            .order_by(
+                PortfolioTransaction.tx_date.desc(),
+                PortfolioTransaction.frst_reg_dt.desc(),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def find_sell_txs_by_account(
+        self, account_id: UUID, household_id: UUID, from_date: date, to_date: date,
+    ) -> list[PortfolioTransaction]:
+        """계좌의 기간 내 매도 거래 — 계좌 누적 매매손익 집계용. 최신순.
+
+        전량매도로 종목(item)이 soft delete 돼도 매도 거래는 ACTIVE 로 남아 포함된다.
+        household_id 를 함께 걸어 소유권을 보장(남의 계좌 id 면 빈 결과).
+        """
+        result = await self.db.execute(
+            select(PortfolioTransaction)
+            .where(
+                and_(
+                    PortfolioTransaction.account_id == account_id,
+                    PortfolioTransaction.household_id == household_id,
+                    PortfolioTransaction.pt_type == PortfolioTxType.SELL,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                    PortfolioTransaction.tx_date >= from_date,
+                    PortfolioTransaction.tx_date <= to_date,
+                )
+            )
+            .order_by(
+                PortfolioTransaction.tx_date.desc(),
+                PortfolioTransaction.frst_reg_dt.desc(),
+            )
+        )
+        return list(result.scalars().all())
+
     @staticmethod
     def _cursor_after(cursor: str | None):
         """tx_date DESC, id DESC 정렬 기준 cursor 조건 — transaction 패턴 그대로"""
@@ -286,6 +335,18 @@ class PortfolioValueHistoryRepository:
         self.db.add_all(histories)
         await self.db.flush()
 
+    async def delete_for_household_month(
+        self, household_id: UUID, snapshot_date: date,
+    ) -> None:
+        """그 가계부의 해당 월 종목 박제 hard delete (upsert 재생성용)."""
+        stmt = delete(PortfolioValueHistory).where(
+            and_(
+                PortfolioValueHistory.household_id == household_id,
+                PortfolioValueHistory.snapshot_date == snapshot_date,
+            )
+        )
+        await self.db.execute(stmt)
+
     async def has_active_for_month(self, household_id: UUID, month_date: date) -> bool:
         """이번 달에 종목 박제됐는지 (account_snapshot 과 동일 패턴)"""
         result = await self.db.execute(
@@ -316,6 +377,24 @@ class PortfolioValueHistoryRepository:
                 PortfolioValueHistory.portfolio_item_id.asc(),
                 PortfolioValueHistory.snapshot_date.asc(),
             )
+        )
+        return list(result.scalars().all())
+
+    async def find_by_household_and_range(
+        self, household_id: UUID, from_date: date, to_date: date,
+    ) -> list[PortfolioValueHistory]:
+        """가계부 전체 종목 박제 — 월별 자산군 배분추이 집계용."""
+        result = await self.db.execute(
+            select(PortfolioValueHistory)
+            .where(
+                and_(
+                    PortfolioValueHistory.household_id == household_id,
+                    PortfolioValueHistory.snapshot_date >= from_date,
+                    PortfolioValueHistory.snapshot_date <= to_date,
+                    PortfolioValueHistory.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .order_by(PortfolioValueHistory.snapshot_date.asc())
         )
         return list(result.scalars().all())
 

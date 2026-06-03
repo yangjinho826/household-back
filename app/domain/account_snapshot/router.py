@@ -21,7 +21,7 @@ async def create_snapshot(
     household: CurrentHousehold,
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[SnapshotMonth]:
-    """지난달 마감 자산 스냅샷 (6/1~6/말에 누르면 5월 박제)"""
+    """수동 박제 — 지난달 박제 (upsert). 6/1~6/말에 누르면 5월 박제, 또 눌러도 안전."""
     response = await service.create_target_month_snapshot(db, household)
     return ApiResponse.ok(data=response)
 

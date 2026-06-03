@@ -165,6 +165,36 @@ class PortfolioTxResponse(CamelBaseModel):
     total: Money
     tx_date: date
     memo: str | None
+    # 매도 실현손익 — SELL 만 값, BUY/미집계는 null
+    realized_pnl: Money | None = None
+
+
+class RealizedPnlRow(CamelBaseModel):
+    """매매손익 — 매도 1건 (증권사 '매매손익' 테이블 행)"""
+
+    tx_id: UUID
+    tx_date: date
+    name: str | None = None  # 계좌 단위 응답에서 종목명 (종목 단위 응답은 None)
+    quantity: Quantity
+    sell_price: Money
+    realized_pnl: Money
+    realized_rate: Rate
+
+
+class RealizedPnlSummary(CamelBaseModel):
+    """매매손익 요약 — 기간 내 매도 전체 합산"""
+
+    total_realized: Money
+    total_rate: Rate
+    sell_amount: Money
+    buy_amount: Money
+
+
+class RealizedPnlResponse(CamelBaseModel):
+    """종목 매매손익 응답 — 요약 + 매도 건별"""
+
+    summary: RealizedPnlSummary
+    rows: list[RealizedPnlRow]
 
 
 class PortfolioValueHistoryPoint(CamelBaseModel):

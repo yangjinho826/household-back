@@ -11,6 +11,7 @@ from app.domain.household.deps import CurrentHousehold
 from app.domain.transaction import service
 from app.domain.transaction.repository import TransactionFilter
 from app.domain.transaction.schema import (
+    AccountLedgerPage,
     CalendarFullResponse,
     TransactionCreateRequest,
     TransactionFormOptionsResponse,
@@ -79,6 +80,27 @@ async def get_transaction_detail(
 ) -> ApiResponse[TransactionResponse]:
     """거래 단건 조회"""
     response = await service.get_transaction_detail(db, household, tx_id)
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/account/{account_id}/ledger")
+async def get_account_ledger(
+    account_id: UUID,
+    household: CurrentHousehold,
+    cursor: str | None = Query(None),
+    limit: int = Query(20, ge=1, le=500),
+    year: int | None = Query(None, ge=2000, le=2100),
+    month: int | None = Query(None, ge=1, le=12),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[AccountLedgerPage]:
+    """계좌별 거래 이력 (커서 페이징) — 각 행에 running balance(거래 후 잔액).
+
+    거래계좌(LIVING/SAVINGS/OTHER) 전용. 이체는 그 계좌 관점 부호로.
+    year+month 를 주면 그 달 거래만(거래 탭), 없으면 전체(계좌 상세).
+    """
+    response = await service.list_account_ledger(
+        db, household, account_id, cursor, limit, year, month,
+    )
     return ApiResponse.ok(data=response)
 
 

@@ -4,7 +4,7 @@
 - 자산 스냅샷 시점의 모든 INVESTMENT 통장 종목 상태를 1행씩 기록
 - 가격/수량/평가액을 그 시점 그대로 보존 (차트의 라인 1개)
 
-호출처: `account_snapshot/service.py` 의 `create_target_month_snapshot` — 매월 박제 시 같이 실행.
+호출처: `account_snapshot/service.py` 의 `_build_and_save_snapshot` — 매월 박제 시 같이 실행.
 """
 
 import logging
@@ -29,14 +29,20 @@ async def snapshot_household_portfolio(
     db: AsyncSession,
     household: Household,
     snapshot_date: date,
+    *,
+    replace: bool = False,
 ) -> list[PortfolioValueHistory]:
     """가계부의 모든 INVESTMENT 통장 종목들을 그 시점 상태로 박제.
 
-    호출처: account_snapshot/service.py 의 create_target_month_snapshot
+    replace=True 면 그달 기존 박제를 먼저 지우고 다시 만듦 (upsert).
+    호출처: account_snapshot/service.py 의 _build_and_save_snapshot
     """
     account_repo = AccountRepository(db)
     item_repo = PortfolioItemRepository(db)
     history_repo = PortfolioValueHistoryRepository(db)
+
+    if replace:
+        await history_repo.delete_for_household_month(household.id, snapshot_date)
 
     accounts = await account_repo.find_active_by_household_id(household.id)
     investment_accounts = [

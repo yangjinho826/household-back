@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from app.domain.portfolio.schema import (
     PortfolioValueHistoryByAccountQuery,
     PortfolioValueHistoryByItem,
     PortfolioValueHistoryByItemQuery,
+    RealizedPnlResponse,
 )
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -53,6 +55,24 @@ async def get_account_overview(
 ) -> ApiResponse[AccountOverviewResponse]:
     """계좌 상세 페이지 진입 — 통장 + (INVESTMENT 면) 보유 종목"""
     response = await service.get_account_overview(db, household, account_id)
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/accounts/{account_id}/realized-pnl")
+async def get_account_realized_pnl(
+    account_id: UUID,
+    household: CurrentHousehold,
+    from_date: date | None = Query(None),
+    to_date: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[RealizedPnlResponse]:
+    """계좌 누적 매매손익 — 기간 내 계좌 전체 매도 건별 실현손익 + 요약. 기본 최근 12개월.
+
+    전량매도로 사라진 종목의 매도도 포함(조회 사각지대 해소).
+    """
+    response = await service.get_realized_pnl_by_account(
+        db, household, account_id, from_date, to_date,
+    )
     return ApiResponse.ok(data=response)
 
 
@@ -93,6 +113,21 @@ async def list_item_transactions(
     """종목 단건 거래 내역 — 무한 스크롤 (cursor + limit)"""
     response = await service.list_item_transactions_cursor(
         db, household, item_id, cursor, limit,
+    )
+    return ApiResponse.ok(data=response)
+
+
+@router.get("/items/{item_id}/realized-pnl")
+async def get_item_realized_pnl(
+    item_id: UUID,
+    household: CurrentHousehold,
+    from_date: date | None = Query(None),
+    to_date: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[RealizedPnlResponse]:
+    """종목 매매손익 — 기간 내 매도 건별 실현손익 + 요약. 기본 최근 12개월."""
+    response = await service.get_realized_pnl_by_item(
+        db, household, item_id, from_date, to_date,
     )
     return ApiResponse.ok(data=response)
 

@@ -35,9 +35,6 @@ class ErrorCode(Enum):
     HOUSEHOLD_MEMBER_NOT_FOUND = (400, "HH005", "해당 멤버를 찾을 수 없습니다.")
     HOUSEHOLD_OWNER_CANNOT_LEAVE = (400, "HH006", "소유자는 가계부에서 나갈 수 없습니다.")
 
-    # 자산 스냅샷 (SN)
-    SNAPSHOT_ALREADY_EXISTS = (400, "SN001", "이번 달 자산 스냅샷이 이미 저장되었습니다.")
-
     # 포트폴리오 (PT)
     STOCK_LOOKUP_FAILED = (404, "PT001", "종목 조회에 실패했습니다.")
 

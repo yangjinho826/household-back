@@ -1,5 +1,5 @@
 from calendar import monthrange
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -75,15 +75,23 @@ class TransactionRepository:
     def _cursor_after(cursor: str | None):
         if not cursor:
             return None
+        # 정렬 키(tx_date desc, frst_reg_dt desc, id desc)와 동일한 3-tuple 비교.
+        # id 가 uuid4(랜덤)라 tie-breaker 일 뿐, 같은 날 순서는 frst_reg_dt 가 결정.
         try:
-            date_str, id_str = cursor.split("|", 1)
+            date_str, reg_str, id_str = cursor.split("|", 2)
             cur_date = date.fromisoformat(date_str)
+            cur_reg = datetime.fromisoformat(reg_str)
             cur_id = UUID(id_str)
         except (ValueError, AttributeError):
             return None
         return or_(
             Transaction.tx_date < cur_date,
-            and_(Transaction.tx_date == cur_date, Transaction.id < cur_id),
+            and_(Transaction.tx_date == cur_date, Transaction.frst_reg_dt < cur_reg),
+            and_(
+                Transaction.tx_date == cur_date,
+                Transaction.frst_reg_dt == cur_reg,
+                Transaction.id < cur_id,
+            ),
         )
 
     async def list_by_cursor(
@@ -100,7 +108,11 @@ class TransactionRepository:
         result = await self.db.execute(
             select(Transaction)
             .where(and_(*conds))
-            .order_by(Transaction.tx_date.desc(), Transaction.id.desc())
+            .order_by(
+                Transaction.tx_date.desc(),
+                Transaction.frst_reg_dt.desc(),
+                Transaction.id.desc(),
+            )
             .limit(limit + 1)
         )
         return list(result.scalars().all())
@@ -112,8 +124,22 @@ class TransactionRepository:
         )
         return result.scalar() or 0
 
-    async def sum_for_account(self, account_id: UUID) -> dict[str, Decimal]:
-        """통장별 거래 합계 — balance 계산용"""
+    async def sum_for_account(
+        self, account_id: UUID, to_date: date | None = None,
+    ) -> dict[str, Decimal]:
+        """통장별 거래 합계 — balance 계산용.
+
+        to_date 를 주면 그 날짜까지의 누적(running balance 기준점용). 없으면 전체.
+        """
+        conds = [
+            Transaction.data_stat_cd == DataStatus.ACTIVE,
+            or_(
+                Transaction.account_id == account_id,
+                Transaction.to_account_id == account_id,
+            ),
+        ]
+        if to_date is not None:
+            conds.append(Transaction.tx_date <= to_date)
         result = await self.db.execute(
             select(
                 Transaction.tx_type,
@@ -121,15 +147,7 @@ class TransactionRepository:
                 Transaction.to_account_id,
                 func.sum(Transaction.amount).label("total"),
             )
-            .where(
-                and_(
-                    Transaction.data_stat_cd == DataStatus.ACTIVE,
-                    or_(
-                        Transaction.account_id == account_id,
-                        Transaction.to_account_id == account_id,
-                    ),
-                )
-            )
+            .where(and_(*conds))
             .group_by(
                 Transaction.tx_type,
                 Transaction.account_id,

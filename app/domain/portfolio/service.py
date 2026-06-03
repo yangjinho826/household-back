@@ -10,7 +10,7 @@
 """
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
@@ -52,6 +52,9 @@ from app.domain.portfolio.schema import (
     PortfolioUpdateRequest,
     PortfolioValueHistoryByItem,
     PortfolioValueHistoryPoint,
+    RealizedPnlResponse,
+    RealizedPnlRow,
+    RealizedPnlSummary,
 )
 from app.domain.portfolio.yahoo import lookup as yahoo_lookup
 
@@ -101,6 +104,7 @@ def _build_tx_response(tx: PortfolioTransaction, account_map: dict) -> Portfolio
         total=tx.quantity * tx.price,
         tx_date=tx.tx_date,
         memo=tx.memo,
+        realized_pnl=tx.realized_pnl,
     )
 
 
@@ -265,6 +269,15 @@ async def sell(
     if req.quantity > item.quantity:
         raise CustomException(ErrorCode.BAD_REQUEST)
 
+    # 실현손익 = (매도가 - 매도시점 평단) * 수량. 평단은 차감 전 값 = 직전 누적 이동평균.
+    # 매수/매도 단가 모두 입력값(원화) 그대로 박제 — buy() 와 동일 기준이라 환산 불필요.
+    realized_cost = (item.avg_price * req.quantity).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP,
+    )
+    realized_pnl = (
+        (req.sell_price - item.avg_price) * req.quantity
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
     # 매도 이력 기록
     pt_tx = PortfolioTransaction(
         household_id=household.id,
@@ -278,6 +291,8 @@ async def sell(
         price=req.sell_price,
         tx_date=req.tx_date or date.today(),
         memo=req.memo,
+        realized_pnl=realized_pnl,
+        realized_cost_basis=realized_cost,
         data_stat_cd=DataStatus.ACTIVE,
     )
     await pt_repo.save(pt_tx)
@@ -301,34 +316,56 @@ async def sell(
     return _build_response(item, {a.id: a for a in accounts})
 
 
+def _recompute_realized_pnl(
+    txs: list[PortfolioTransaction],
+) -> tuple[Decimal, Decimal]:
+    """거래를 시간순 replay 하며 각 SELL 의 실현손익을 그 시점 평단으로 재박제.
+
+    거래 수정/삭제로 평단이 바뀌면 과거 SELL 의 박제값이 틀어지므로,
+    매도시점 누적 이동평균(running_avg)으로 다시 계산해 SELL row 를 갱신한다.
+    txs 의 price 는 이미 KRW 박제값이라 환율 변환 불필요.
+
+    반환: replay 종료 시점의 (남은 수량, 남은 원가) — 호출부의 평단 재계산용.
+    """
+    running_qty = Decimal("0")
+    running_cost = Decimal("0")
+    for t in txs:
+        if t.pt_type == PortfolioTxType.BUY:
+            running_qty += t.quantity
+            running_cost += t.quantity * t.price
+        elif t.pt_type == PortfolioTxType.SELL:
+            running_avg = running_cost / running_qty if running_qty > 0 else Decimal("0")
+            t.realized_cost_basis = (running_avg * t.quantity).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP,
+            )
+            t.realized_pnl = (
+                (t.price - running_avg) * t.quantity
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            # 매도는 평단 불변 — 수량/원가를 평단 비율로 차감 (running_avg 유지)
+            running_cost -= running_avg * t.quantity
+            running_qty -= t.quantity
+    return running_qty, running_cost
+
+
 async def _recalc_item_from_transactions(
     db: AsyncSession, item: PortfolioItem,
 ) -> None:
-    """종목의 활성 거래 합산 → quantity / avg_price 재계산.
+    """종목의 활성 거래 시간순 replay → quantity / avg_price 재계산.
 
-    매수 가중평균만 avg_price 에 반영. 매도는 수량만 차감 (avg 영향 X).
-    매도가 매수보다 많으면 BAD_REQUEST.
+    이동평균: 매도 시점 평단으로 원가를 차감하므로 매도 후 재매수도 정확히
+    반영된다(단순 전체매수합/전체매수량은 평단을 왜곡). 매도 실현손익 재박제와
+    같은 replay 를 공유한다. 매도가 매수보다 많으면 BAD_REQUEST.
     """
     pt_repo = PortfolioTransactionRepository(db)
     txs = await pt_repo.find_active_by_item_id(item.id)
 
-    total_buy_qty = Decimal("0")
-    total_buy_cost = Decimal("0")
-    total_sell_qty = Decimal("0")
-    for t in txs:
-        if t.pt_type == PortfolioTxType.BUY:
-            total_buy_qty += t.quantity
-            total_buy_cost += t.quantity * t.price
-        elif t.pt_type == PortfolioTxType.SELL:
-            total_sell_qty += t.quantity
-
-    remaining = total_buy_qty - total_sell_qty
-    if remaining < 0:
+    remaining_qty, remaining_cost = _recompute_realized_pnl(txs)
+    if remaining_qty < 0:
         raise CustomException(ErrorCode.BAD_REQUEST)
 
-    item.quantity = remaining
+    item.quantity = remaining_qty
     item.avg_price = (
-        total_buy_cost / total_buy_qty if total_buy_qty > 0 else Decimal("0.00")
+        remaining_cost / remaining_qty if remaining_qty > 0 else Decimal("0.00")
     )
     await db.flush()
 
@@ -429,6 +466,16 @@ def _default_date_range(
     return from_date, to_date
 
 
+def _month_end(d: date) -> date:
+    """월 1일로 정규화된 날짜의 그 달 말일.
+
+    realized_pnl 쿼리는 `tx_date <= to_date`(일 단위)인데 _default_date_range 가
+    to_date 를 월 1일로 정규화하므로, 그 달 전체를 포함하려면 말일까지 넓혀야 한다.
+    """
+    nxt = date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
+    return nxt - timedelta(days=1)
+
+
 def _to_history_point(row: PortfolioValueHistory) -> PortfolioValueHistoryPoint:
     return PortfolioValueHistoryPoint(
         snapshot_date=row.snapshot_date,
@@ -438,6 +485,114 @@ def _to_history_point(row: PortfolioValueHistory) -> PortfolioValueHistoryPoint:
         cost=row.cost,
         valuation=row.valuation,
     )
+
+
+async def get_realized_pnl_by_item(
+    db: AsyncSession,
+    household: Household,
+    item_id: UUID,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> RealizedPnlResponse:
+    """종목 매매손익 — 기간 내 매도 건별 실현손익 + 요약.
+
+    증권사 '매매손익' 화면과 동일 구성. 기간 미지정 시 최근 12개월.
+    구버전 SELL(realized=NULL) 은 0 으로 간주해 합계 왜곡 방지.
+    """
+    item = await PortfolioItemRepository(db).find_by_id(item_id)
+    if not item or item.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    from_date, to_date = _default_date_range(from_date, to_date)
+    sells = await PortfolioTransactionRepository(db).find_sell_txs_by_item(
+        item_id, from_date, _month_end(to_date),
+    )
+
+    rows: list[RealizedPnlRow] = []
+    total_realized = Decimal("0.00")
+    total_cost = Decimal("0.00")
+    total_sell = Decimal("0.00")
+    for tx in sells:
+        pnl = tx.realized_pnl or Decimal("0.00")
+        cost = tx.realized_cost_basis or Decimal("0.00")
+        rate = (pnl / cost * 100) if cost > 0 else Decimal("0.00")
+        rows.append(
+            RealizedPnlRow(
+                tx_id=tx.id,
+                tx_date=tx.tx_date,
+                quantity=tx.quantity,
+                sell_price=tx.price,
+                realized_pnl=pnl,
+                realized_rate=rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            )
+        )
+        total_realized += pnl
+        total_cost += cost
+        total_sell += tx.quantity * tx.price
+
+    total_rate = (
+        (total_realized / total_cost * 100) if total_cost > 0 else Decimal("0.00")
+    )
+    summary = RealizedPnlSummary(
+        total_realized=total_realized,
+        total_rate=total_rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        sell_amount=total_sell,
+        buy_amount=total_cost,
+    )
+    return RealizedPnlResponse(summary=summary, rows=rows)
+
+
+async def get_realized_pnl_by_account(
+    db: AsyncSession,
+    household: Household,
+    account_id: UUID,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> RealizedPnlResponse:
+    """계좌 누적 매매손익 — 기간 내 계좌의 모든 종목 매도 건별 실현손익 + 요약.
+
+    전량매도로 종목이 사라져도 매도 거래는 남아 집계에 포함된다(조회 사각지대 해소).
+    여러 종목이 섞이므로 row 에 종목명(name)을 채운다. 기간 미지정 시 최근 12개월.
+    구버전 SELL(realized=NULL) 은 0 으로 간주해 합계 왜곡 방지.
+    """
+    from_date, to_date = _default_date_range(from_date, to_date)
+    sells = await PortfolioTransactionRepository(db).find_sell_txs_by_account(
+        account_id, household.id, from_date, _month_end(to_date),
+    )
+
+    rows: list[RealizedPnlRow] = []
+    total_realized = Decimal("0.00")
+    total_cost = Decimal("0.00")
+    total_sell = Decimal("0.00")
+    for tx in sells:
+        pnl = tx.realized_pnl or Decimal("0.00")
+        cost = tx.realized_cost_basis or Decimal("0.00")
+        rate = (pnl / cost * 100) if cost > 0 else Decimal("0.00")
+        rows.append(
+            RealizedPnlRow(
+                tx_id=tx.id,
+                tx_date=tx.tx_date,
+                name=tx.name,
+                quantity=tx.quantity,
+                sell_price=tx.price,
+                realized_pnl=pnl,
+                realized_rate=rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            )
+        )
+        total_realized += pnl
+        total_cost += cost
+        total_sell += tx.quantity * tx.price
+
+    total_rate = (
+        (total_realized / total_cost * 100) if total_cost > 0 else Decimal("0.00")
+    )
+    summary = RealizedPnlSummary(
+        total_realized=total_realized,
+        total_rate=total_rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        sell_amount=total_sell,
+        buy_amount=total_cost,
+    )
+    return RealizedPnlResponse(summary=summary, rows=rows)
 
 
 async def get_value_history_by_account(

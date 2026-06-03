@@ -39,6 +39,13 @@ class HouseholdRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
+    async def find_all_active(self) -> list[Household]:
+        """모든 활성 가계부 — 월간 자동 스냅샷 배치용."""
+        result = await self.db.execute(
+            select(Household).where(Household.data_stat_cd == DataStatus.ACTIVE)
+        )
+        return list(result.scalars().all())
+
     async def save(self, household: Household) -> None:
         self.db.add(household)
         await self.db.flush()

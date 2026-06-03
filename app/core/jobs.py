@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.idempotency import service as idempotency_service
 from app.core.scheduler import run_locked_job
+from app.domain.account_snapshot import service as account_snapshot_service
 from app.domain.exchange_rate import service as exchange_rate_service
 from app.domain.market_price import service as market_price_service
 from app.domain.portfolio.enum import Market
@@ -41,3 +42,15 @@ async def refresh_us_prices_job() -> None:
 async def cleanup_idempotency_job() -> None:
     """idempotency 레코드 만료 정리 — 매시간."""
     await run_locked_job("cleanup_idempotency", idempotency_service.cleanup_expired)
+
+
+async def create_monthly_snapshots_job() -> None:
+    """월간 자산 스냅샷 자동 박제 — 매월 1일 00:30 KST (지난달 마감).
+
+    전월 말일 종가가 이미 시세에 반영된 시점. 모든 가계부 순회, 이미 박제됐으면 skip.
+    """
+
+    async def _run(session: AsyncSession) -> None:
+        await account_snapshot_service.create_monthly_snapshots_for_all(session)
+
+    await run_locked_job("create_monthly_snapshots", _run)

@@ -8,6 +8,22 @@ class PortfolioTxType(StrEnum):
     SELL = "SELL"
 
 
+class AssetClass(StrEnum):
+    """자산군 배분 슬라이스 축 — 자산 페이지 배분 파이/추이를 group by 하는 키.
+
+    종목(PortfolioItem)은 분류 없이 전부 INVESTMENT 한 덩어리로 집계한다(채권ETF·
+    기타 포함). 실물(COMMODITY=금·원자재)·부동산·연금은 수동자산(ManualAsset)이
+    전용계좌로 roll-up 되어 각 슬라이스를 차지한다. CASH 는 현금성 계좌 잔액.
+    """
+
+    INVESTMENT = "INVESTMENT"
+    COMMODITY = "COMMODITY"
+    CASH = "CASH"
+    REAL_ESTATE = "REAL_ESTATE"
+    PENSION = "PENSION"
+    OTHER = "OTHER"
+
+
 class Market(StrEnum):
     """종목 시장 — Yahoo 심볼 접미사 1:1 매핑.
 

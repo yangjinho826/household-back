@@ -118,6 +118,20 @@ class TransactionResponse(CamelBaseModel):
 TransactionListResponse = CursorPage[TransactionResponse]
 
 
+class AccountLedgerItem(TransactionResponse):
+    """계좌 거래 이력 행 — 거래 응답 + 그 계좌 관점의 부호 금액 + 거래 후 잔액.
+
+    signed_amount: 이 계좌 기준 +(입금/수입)/−(출금/지출). 이체는 양쪽 계좌에서 부호 다름.
+    balance_after: 그 거래 직후 이 계좌의 현금흐름 잔액(running balance).
+    """
+
+    signed_amount: Money
+    balance_after: Money
+
+
+AccountLedgerPage = CursorPage[AccountLedgerItem]
+
+
 class CalendarDay(CamelBaseModel):
     date: date
     income: Money
