@@ -36,7 +36,7 @@ async def login(db: AsyncSession, req: LoginRequest) -> tuple[TokenResponse, str
         logger.warning("비활성 계정 로그인 시도 (user_id=%s)", user.id)
         raise CustomException(ErrorCode.FORBIDDEN)
 
-    if not verify_password(req.password, user.password_hash):
+    if not await verify_password(req.password, user.password_hash):
         logger.warning("로그인 실패 (email=%s) - 비밀번호 불일치", email)
         raise CustomException(ErrorCode.LOGIN_FAILED)
 

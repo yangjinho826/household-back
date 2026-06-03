@@ -22,7 +22,7 @@ async def create_user(db: AsyncSession, req: UserCreateRequest) -> User:
     user = User(
         email=email,
         name=name,
-        password_hash=hash_password(req.password),
+        password_hash=await hash_password(req.password),
         language=req.language,
         data_stat_cd=DataStatus.ACTIVE,
     )
@@ -63,7 +63,9 @@ async def update_user(
         raise CustomException(ErrorCode.NOT_FOUND)
 
     name = req.name.strip() if req.name is not None else None
-    password_hash = hash_password(req.password) if req.password is not None else None
+    password_hash = (
+        await hash_password(req.password) if req.password is not None else None
+    )
 
     user.update(name=name, password_hash=password_hash, language=req.language)
     await db.flush()
