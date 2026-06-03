@@ -3,33 +3,28 @@
 ## Goal
 
 **가계부 × 자산 통합 — 월별 자산변동 추적** (총자산 기준, 부채/순자산 안 함).
-현재 사이클: **R5a — 자산성격(asset_class) 배분 + 부동산·연금(ManualAsset) + 월별 배분추이**.
-
-상세 계획·실행가이드는 **front 레포 `.claude/memory-bank/R5a-plan.md`** (단일 정본).
+직전 사이클 R5a(asset_class 배분 + ManualAsset) 완료. 이번 작업: **삭제 정책 개편 + codex 백엔드 QA 버그 일괄 수정**.
 
 ## Status
 
-R1~R4 dev 커밋 완료(back ~a3c9afb). dev→main 머지 안 함.
+**브랜치 `feat/delete-policy-cascade` — 백엔드 16파일 + tests/ 신규, 프론트 6파일. 커밋 진행 중, push 안 함. pytest 13 green.**
 
-**R5a-1 (asset_class + 현재 배분) 백엔드 완료, 미커밋**:
-- `portfolio/enum.py` AssetClass · `portfolio/model.py` asset_class 컬럼
-- 마이그레이션 A `b8e4d1a09c37_add_portfolio_asset_class` (Revises a3f7c9d2e1b8, 백필 없음 전부 STOCK)
-- `enum/service.py` dispatch · `portfolio/schema.py`·`service.py` 반영
-- `wealth/service.py _build_allocation` + `wealth/schema.py` AssetClassSlice/AllocationResponse
-- 검증: 마이그레이션 가역성 OK · 9001 QA `wealth/overview.allocation` 정상
-
-⬜ R5a-2 ManualAsset 도메인 / ⬜ R5a-3 asset_class_snapshots — `R5a-plan.md` 참조.
+완료:
+- 통장 삭제: 차단→cascade soft-delete(D안 — 이체 상대 살아있으면 행 보존, 보유종목만 차단, 단독거래/수동자산/종목이력/스냅샷 cascade)
+- 카테고리 삭제: 차단 제거, category_id 유지
+- 프론트 무알림 6곳: 삭제 모달 onConfirm try/catch + getErrorMessage red 토스트
+- codex QA 7개: PATCH 이체 깨짐 / fixed_expense_id 검증 / 카테고리 kind 정합성 / 종목 재계산 스킵 / 수동자산 cascade / 계좌 N+1 배치화 / bcrypt async offload
+- stats 회귀: 삭제 카테고리 거래 by_category 누락 fix(find_by_ids)
 
 ## Context
 
-- **2축 분리**: market(거래소) 유지 + asset_class(STOCK/BOND/COMMODITY/CASH/REAL_ESTATE/PENSION/OTHER) 신규. 가격 갱신은 `market_price/service.py`가 market 축만 사용 → asset_class 무관.
-- 총자산 = `Σ account.balance`(home/wealth service), 추이 = `Σ account_snapshot.balance`. 모든 자산은 계좌 roll-up으로 집계에 들어옴.
-- R5a-2 통합점: `account/service.py:46` `_calc_balance`에 ManualAsset 계좌 분기. R5a-3 통합점: `account_snapshot/service.py:133` 직후 `snapshot_household_allocation`.
-- codex 함정: carry-forward/as-of, historical truth, double counting, aggregation loss → `R5a-plan.md`.
-- **로컬 DB 항상 `alembic upgrade head`** 선행. head = `b8e4d1a09c37`.
+- **이체 D안 핵심**: 통장 삭제 시 이체 행을 남겨 살아있는 상대통장 잔액·통계 보존. `soft_delete_transfers_with_dead_counterparty`는 양쪽 다 DELETED인 이체만 삭제. 통장 본체 죽이기 전에 실행해야 자기 자신 오판 방지.
+- **N+1 배치화 안전망**: `_load_balance_sources`(4쿼리) + `_build_balance`. 단건 `_calc_balance`는 유지. `test_account_balance.py`가 list==detail 동일성 검증(cash/투자/수동자산).
+- **테스트 인프라 신규**: aiosqlite in-memory(StaticPool), `tests/conftest.py` 시드 헬퍼. `func.extract` 쓰는 stats 쿼리는 sqlite 비호환이라 stats 테스트는 미작성.
+- 노션 API 레퍼런스 79개 기록: Private메모DB/대분류=개인/중분류=Household.
 
 ## Next Step
 
-1. R5a-1 커밋 (back).
-2. R5a-2 착수 — ManualAsset (`R5a-plan.md` R5a-2 섹션).
-3. R5a-3 → dev→main 머지 검토.
+1. 이번 브랜치 커밋 마무리(feat 삭제정책 / fix codex / perf / test 분리) + 메모리 커밋.
+2. 프론트 무알림 6곳 커밋.
+3. PR → main 머지 검토.
