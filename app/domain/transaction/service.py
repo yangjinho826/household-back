@@ -10,7 +10,9 @@ from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
 from app.domain.account.enum import MANUAL_ASSET_ACCOUNT_TYPES, AccountType
 from app.domain.account.repository import AccountRepository
+from app.domain.category.enum import CategoryKind
 from app.domain.category.repository import CategoryRepository
+from app.domain.fixed.repository import FixedRepository
 from app.domain.household.model import Household
 from app.domain.transaction.enum import TxType
 from app.domain.transaction.model import Transaction
@@ -37,6 +39,27 @@ from app.domain.user.model import User
 _LEDGER_ACCOUNT_TYPES = (AccountType.LIVING, AccountType.SAVINGS, AccountType.OTHER)
 
 logger = logging.getLogger(__name__)
+
+
+def _category_kind_matches(tx_type: TxType, kind: str) -> bool:
+    """지출계열 거래엔 EXPENSE 카테고리, 수입 거래엔 INCOME 카테고리만 허용.
+    kind 불일치 시 월합계(타입 기준)와 카테고리차트(kind 기준)가 어긋난다."""
+    if tx_type in (TxType.EXPENSE, TxType.FIXED_EXPENSE):
+        return kind == CategoryKind.EXPENSE
+    if tx_type == TxType.INCOME:
+        return kind == CategoryKind.INCOME
+    return True  # TRANSFER 는 category 없음
+
+
+async def _validate_fixed_belongs(
+    db: AsyncSession, household_id: UUID, fixed_expense_id: UUID | None,
+) -> None:
+    """고정지출 매핑 ID 가 같은 household 소속인지 검증 (타 가계부 ID 차단)."""
+    if fixed_expense_id is None:
+        return
+    fixed = await FixedRepository(db).find_by_id(fixed_expense_id)
+    if not fixed or fixed.household_id != household_id:
+        raise CustomException(ErrorCode.NOT_FOUND)
 
 
 async def _validate_fk_belong_to_household(
@@ -69,6 +92,8 @@ async def _validate_fk_belong_to_household(
         for c in categories:
             if c.household_id != household_id or c.data_stat_cd != DataStatus.ACTIVE:
                 raise CustomException(ErrorCode.NOT_FOUND)
+            if tx_type is not None and not _category_kind_matches(tx_type, c.kind):
+                raise CustomException(ErrorCode.BAD_REQUEST)
 
 
 async def list_transactions(
@@ -305,6 +330,7 @@ async def create_transaction(
     await _validate_fk_belong_to_household(
         db, household.id, account_ids, category_ids, tx_type=req.tx_type,
     )
+    await _validate_fixed_belongs(db, household.id, req.fixed_expense_id)
 
     tx = Transaction(
         household_id=household.id,
@@ -312,7 +338,7 @@ async def create_transaction(
         amount=req.amount,
         tx_date=req.tx_date,
         account_id=req.account_id,
-        to_account_id=req.to_account_id,
+        to_account_id=req.to_account_id if req.tx_type == TxType.TRANSFER else None,
         category_id=req.category_id,
         paid_by_user_id=req.paid_by_user_id or current_user.id,
         fixed_expense_id=req.fixed_expense_id,
@@ -350,6 +376,10 @@ async def _validate_update_fks(
     await _validate_fk_belong_to_household(
         db, household.id, fk_accounts, fk_categories, tx_type=new_tx_type,
     )
+    new_fixed_id = (
+        req.fixed_expense_id if req.fixed_expense_id is not None else tx.fixed_expense_id
+    )
+    await _validate_fixed_belongs(db, household.id, new_fixed_id)
 
 
 def _apply_partial_update(tx: Transaction, req: TransactionUpdateRequest) -> None:
@@ -358,6 +388,13 @@ def _apply_partial_update(tx: Transaction, req: TransactionUpdateRequest) -> Non
         value = getattr(req, field)
         if value is not None:
             setattr(tx, field, value)
+
+
+def _normalize_to_account(tx: Transaction) -> None:
+    """TRANSFER 가 아니면 도착계좌는 무의미 — 타입 전환(이체→지출 등) 시 잔존
+    to_account_id 를 제거해야 상대 계좌 원장에 가짜 거래가 잡히지 않는다."""
+    if tx.tx_type != TxType.TRANSFER:
+        tx.to_account_id = None
 
 
 def _validate_transfer_consistency(tx: Transaction) -> None:
@@ -380,6 +417,7 @@ async def update_transaction(
 
     await _validate_update_fks(db, household, tx, req)
     _apply_partial_update(tx, req)
+    _normalize_to_account(tx)
     _validate_transfer_consistency(tx)
 
     await db.flush()

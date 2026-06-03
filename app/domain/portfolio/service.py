@@ -371,6 +371,8 @@ async def _recalc_item_from_transactions(
     item.avg_price = (
         remaining_cost / remaining_qty if remaining_qty > 0 else Decimal("0.00")
     )
+    # 거래 수정/삭제로 수량이 0→양수면 종목 부활, 양수→0이면 소멸(전량매도와 동일).
+    item.data_stat_cd = DataStatus.ACTIVE if remaining_qty > 0 else DataStatus.DELETED
     await db.flush()
 
 
@@ -394,9 +396,10 @@ async def update_portfolio_transaction(
     await db.flush()
 
     # 종목 재계산 (tx 는 BUY/SELL 모두 portfolio_item_id 보유)
+    # 전량매도로 죽은 종목도 재계산 대상이라 상태 무관 조회.
     if tx.portfolio_item_id:
         item_repo = PortfolioItemRepository(db)
-        item = await item_repo.find_by_id(tx.portfolio_item_id)
+        item = await item_repo.find_by_id_any_status(tx.portfolio_item_id)
         if item:
             await _recalc_item_from_transactions(db, item)
 
@@ -420,7 +423,7 @@ async def delete_portfolio_transaction(
 
     if tx.portfolio_item_id:
         item_repo = PortfolioItemRepository(db)
-        item = await item_repo.find_by_id(tx.portfolio_item_id)
+        item = await item_repo.find_by_id_any_status(tx.portfolio_item_id)
         if item:
             await _recalc_item_from_transactions(db, item)
 

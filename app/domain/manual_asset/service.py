@@ -9,6 +9,7 @@ from app.core.exceptions import CustomException, ErrorCode
 from app.domain.account.enum import AccountType
 from app.domain.account.model import Account
 from app.domain.account.repository import AccountRepository
+from app.domain.account_snapshot.repository import AccountSnapshotRepository
 from app.domain.household.model import Household
 from app.domain.manual_asset.model import ManualAsset
 from app.domain.manual_asset.repository import ManualAssetRepository
@@ -18,6 +19,7 @@ from app.domain.manual_asset.schema import (
     ManualAssetUpdateRequest,
 )
 from app.domain.portfolio.enum import AssetClass
+from app.domain.transaction.repository import TransactionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -163,9 +165,15 @@ async def delete(
     if not asset or asset.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
     asset.data_stat_cd = DataStatus.DELETED
-    # 1:1 전용계좌도 함께 soft-delete (고아 계좌 방지)
+    # 1:1 전용계좌 + 그 계좌의 거래·스냅샷도 cascade (통장 삭제와 동일 정책).
+    # 수동자산 통장은 종목이 없어 일반거래/이체/스냅샷만 정리하면 된다.
+    # 이체는 통장 본체를 죽이기 전에 처리해야 상대 판정이 정확하다.
     account = await AccountRepository(db).find_by_id(asset.account_id)
     if account:
+        tx_repo = TransactionRepository(db)
+        await tx_repo.soft_delete_solo_by_account_id(account.id)
+        await tx_repo.soft_delete_transfers_with_dead_counterparty(account.id)
+        await AccountSnapshotRepository(db).soft_delete_by_account_id(account.id)
         account.data_stat_cd = DataStatus.DELETED
     await db.flush()
     logger.info("수동자산 삭제 (asset_id=%s, account_id=%s)", asset_id, asset.account_id)

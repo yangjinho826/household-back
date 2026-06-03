@@ -22,7 +22,10 @@ async def get_monthly_stats(
     type_sums = await tx_repo.sum_by_type_for_month(household.id, year, month)
     category_sums = await tx_repo.sum_by_category_for_month(household.id, year, month)
 
-    categories = await cat_repo.find_active_by_household_id(household.id)
+    # 거래에 등장한 카테고리만 id 로 조회 — find_by_ids 는 필터가 없어 삭제된
+    # 카테고리도 포함된다. 삭제된 카테고리의 기존 거래가 by_category 에서 누락되지 않도록.
+    cat_ids = [cat_id for cat_id, _ in category_sums]
+    categories = await cat_repo.find_by_ids(cat_ids)
     cat_map = {c.id: c for c in categories}
 
     # 같은 kind 안에서 max 잡기 (ratio 계산용)
