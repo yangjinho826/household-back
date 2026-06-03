@@ -14,9 +14,7 @@ from app.domain.category.schema import (
     CategoryResponse,
     CategoryUpdateRequest,
 )
-from app.domain.fixed.repository import FixedRepository
 from app.domain.household.model import Household
-from app.domain.transaction.repository import TransactionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -158,12 +156,9 @@ async def delete_category(
     if not category or category.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
-    # 자식 존재 가드 — 이 카테고리를 쓰는 활성 거래/고정비가 있으면 삭제 차단(분류 무결성).
-    if await TransactionRepository(db).exists_active_by_category_id(category_id):
-        raise CustomException(ErrorCode.CATEGORY_IN_USE)
-    if await FixedRepository(db).exists_active_by_category_id(category_id):
-        raise CustomException(ErrorCode.CATEGORY_IN_USE)
-
+    # 차단 없이 soft-delete만 — 거래/고정비의 category_id 는 그대로 유지한다.
+    # 죽은 카테고리도 find_by_ids(필터 없음)로 기존 거래에선 이름 조회되고,
+    # 활성 목록(find_active_by_household_id)에선 빠져 새 입력 선택지에서만 제외된다.
     category.data_stat_cd = DataStatus.DELETED
     await db.flush()
     logger.info("카테고리 삭제 (category_id=%s)", category_id)

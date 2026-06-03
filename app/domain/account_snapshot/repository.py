@@ -1,7 +1,7 @@
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import and_, delete, exists, func, select
+from sqlalchemy import and_, delete, exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
@@ -97,6 +97,23 @@ class AccountSnapshotRepository:
             AccountSnapshot.snapshot_date == month_first,
         )
         await self.db.execute(stmt)
+
+    async def soft_delete_by_account_id(self, account_id: UUID) -> int:
+        """이 통장의 스냅샷 soft-delete — 통장 cascade용.
+        (월별 upsert 재생성용 delete_for_household_month 와 달리 통장 삭제 시 보존 X)"""
+        stmt = (
+            update(AccountSnapshot)
+            .where(
+                and_(
+                    AccountSnapshot.account_id == account_id,
+                    AccountSnapshot.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .values(data_stat_cd=DataStatus.DELETED)
+            .execution_options(synchronize_session=False)
+        )
+        result = await self.db.execute(stmt)
+        return result.rowcount or 0
 
     async def save_all(self, snapshots: list[AccountSnapshot]) -> None:
         if not snapshots:

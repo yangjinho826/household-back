@@ -3,10 +3,12 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.enums.data_status import DataStatus
+from app.domain.account.model import Account
 from app.domain.transaction.enum import TxType
 from app.domain.transaction.model import Transaction
 
@@ -124,37 +126,61 @@ class TransactionRepository:
         )
         return result.scalar() or 0
 
-    async def exists_active_by_account_id(self, account_id: UUID) -> bool:
-        """이 통장을 출금처/입금처로 쓰는 활성 거래가 있는가 — 통장 삭제 가드용.
-        이체는 account_id·to_account_id 양방향 참조라 둘 다 검사."""
-        result = await self.db.execute(
-            select(Transaction.id)
+    async def soft_delete_solo_by_account_id(self, account_id: UUID) -> int:
+        """이 통장의 단독거래(수입/지출/고정비, 이체 아님) soft-delete — 통장 cascade용.
+        이체는 상대 통장과 공유라 여기서 제외(to_account_id IS NULL 로 단독만)."""
+        stmt = (
+            update(Transaction)
+            .where(
+                and_(
+                    Transaction.account_id == account_id,
+                    Transaction.to_account_id.is_(None),
+                    Transaction.tx_type.in_(
+                        [TxType.INCOME, TxType.EXPENSE, TxType.FIXED_EXPENSE]
+                    ),
+                    Transaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .values(data_stat_cd=DataStatus.DELETED)
+            .execution_options(synchronize_session=False)
+        )
+        result = await self.db.execute(stmt)
+        return result.rowcount or 0
+
+    async def soft_delete_transfers_with_dead_counterparty(
+        self, account_id: UUID,
+    ) -> int:
+        """이 통장이 낀 이체 중 '상대 통장도 이미 DELETED'인 것만 soft-delete.
+        상대가 ACTIVE면 행 유지 — 살아있는 상대 통장 잔액·통계 보존(D안).
+        통장 본체를 죽이기 전에 호출해야 자기 자신을 상대로 오판하지 않음."""
+        dead = aliased(Account)
+        counterparty = case(
+            (Transaction.account_id == account_id, Transaction.to_account_id),
+            else_=Transaction.account_id,
+        )
+        stmt = (
+            update(Transaction)
             .where(
                 and_(
                     Transaction.data_stat_cd == DataStatus.ACTIVE,
+                    Transaction.tx_type == TxType.TRANSFER,
                     or_(
                         Transaction.account_id == account_id,
                         Transaction.to_account_id == account_id,
                     ),
+                    exists().where(
+                        and_(
+                            dead.id == counterparty,
+                            dead.data_stat_cd == DataStatus.DELETED,
+                        )
+                    ),
                 )
             )
-            .limit(1)
+            .values(data_stat_cd=DataStatus.DELETED)
+            .execution_options(synchronize_session=False)
         )
-        return result.scalar_one_or_none() is not None
-
-    async def exists_active_by_category_id(self, category_id: UUID) -> bool:
-        """이 카테고리를 쓰는 활성 거래가 있는가 — 카테고리 삭제 가드용."""
-        result = await self.db.execute(
-            select(Transaction.id)
-            .where(
-                and_(
-                    Transaction.data_stat_cd == DataStatus.ACTIVE,
-                    Transaction.category_id == category_id,
-                )
-            )
-            .limit(1)
-        )
-        return result.scalar_one_or_none() is not None
+        result = await self.db.execute(stmt)
+        return result.rowcount or 0
 
     async def sum_for_account(
         self, account_id: UUID, to_date: date | None = None,
@@ -207,6 +233,57 @@ class TransactionRepository:
                 if to_acc_id == account_id:
                     sums["transfer_in"] += total
         return sums
+
+    async def sum_for_accounts(
+        self, account_ids: list[UUID],
+    ) -> dict[UUID, dict[str, Decimal]]:
+        """여러 통장 거래합 배치 — sum_for_account 의 N+1 제거 버전(현재잔액용).
+        단건 sum_for_account 와 동일 분배 로직(이체는 출금·입금 양쪽 반영)."""
+        base = {
+            aid: {
+                "income": Decimal("0"),
+                "expense": Decimal("0"),
+                "transfer_out": Decimal("0"),
+                "transfer_in": Decimal("0"),
+            }
+            for aid in account_ids
+        }
+        if not account_ids:
+            return base
+        id_set = set(account_ids)
+        result = await self.db.execute(
+            select(
+                Transaction.tx_type,
+                Transaction.account_id,
+                Transaction.to_account_id,
+                func.sum(Transaction.amount).label("total"),
+            )
+            .where(
+                and_(
+                    Transaction.data_stat_cd == DataStatus.ACTIVE,
+                    or_(
+                        Transaction.account_id.in_(account_ids),
+                        Transaction.to_account_id.in_(account_ids),
+                    ),
+                )
+            )
+            .group_by(
+                Transaction.tx_type,
+                Transaction.account_id,
+                Transaction.to_account_id,
+            )
+        )
+        for tx_type, acc_id, to_acc_id, total in result.all():
+            if acc_id in id_set:
+                if tx_type == TxType.INCOME:
+                    base[acc_id]["income"] += total
+                elif tx_type in (TxType.EXPENSE, TxType.FIXED_EXPENSE):
+                    base[acc_id]["expense"] += total
+                elif tx_type == TxType.TRANSFER:
+                    base[acc_id]["transfer_out"] += total
+            if to_acc_id in id_set and tx_type == TxType.TRANSFER:
+                base[to_acc_id]["transfer_in"] += total
+        return base
 
     async def sum_by_account_for_month(
         self, account_id: UUID, year: int, month: int,

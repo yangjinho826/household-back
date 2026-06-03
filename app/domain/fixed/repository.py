@@ -36,20 +36,6 @@ class FixedRepository:
         )
         return list(result.scalars().all())
 
-    async def exists_active_by_category_id(self, category_id: UUID) -> bool:
-        """이 카테고리를 쓰는 활성 고정비가 있는가 — 카테고리 삭제 가드용."""
-        result = await self.db.execute(
-            select(FixedExpense.id)
-            .where(
-                and_(
-                    FixedExpense.data_stat_cd == DataStatus.ACTIVE,
-                    FixedExpense.category_id == category_id,
-                )
-            )
-            .limit(1)
-        )
-        return result.scalar_one_or_none() is not None
-
     async def search_by_household_id(
         self,
         household_id: UUID,

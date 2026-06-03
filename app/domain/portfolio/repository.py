@@ -29,6 +29,32 @@ class PortfolioItemRepository:
         )
         return result.scalar_one_or_none()
 
+    async def find_by_id_any_status(self, item_id: UUID) -> PortfolioItem | None:
+        """삭제 상태 무관 조회 — 전량매도로 죽은 종목의 거래 수정/삭제 재계산용."""
+        result = await self.db.execute(
+            select(PortfolioItem).where(PortfolioItem.id == item_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def find_active_by_account_ids(
+        self, account_ids: list[UUID],
+    ) -> dict[UUID, list[PortfolioItem]]:
+        """여러 통장 보유종목 배치 — 계좌목록 잔액 N+1 제거용."""
+        base: dict[UUID, list[PortfolioItem]] = {aid: [] for aid in account_ids}
+        if not account_ids:
+            return base
+        result = await self.db.execute(
+            select(PortfolioItem).where(
+                and_(
+                    PortfolioItem.account_id.in_(account_ids),
+                    PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+        )
+        for item in result.scalars().all():
+            base[item.account_id].append(item)
+        return base
+
     async def find_active_by_household_id(self, household_id: UUID) -> list[PortfolioItem]:
         result = await self.db.execute(
             select(PortfolioItem)
@@ -262,9 +288,59 @@ class PortfolioTransactionRepository:
                 sums["sell"] = Decimal(total)
         return sums
 
+    async def sum_for_accounts(
+        self, account_ids: list[UUID],
+    ) -> dict[UUID, dict[str, Decimal]]:
+        """여러 통장 BUY/SELL 합산 배치 — 계좌목록 잔액 N+1 제거용."""
+        base = {
+            aid: {"buy": Decimal("0"), "sell": Decimal("0")} for aid in account_ids
+        }
+        if not account_ids:
+            return base
+        result = await self.db.execute(
+            select(
+                PortfolioTransaction.account_id,
+                PortfolioTransaction.pt_type,
+                func.coalesce(
+                    func.sum(PortfolioTransaction.quantity * PortfolioTransaction.price), 0
+                ).label("total"),
+            )
+            .where(
+                and_(
+                    PortfolioTransaction.account_id.in_(account_ids),
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .group_by(
+                PortfolioTransaction.account_id, PortfolioTransaction.pt_type,
+            )
+        )
+        for account_id, pt_type, total in result.all():
+            if pt_type == PortfolioTxType.BUY:
+                base[account_id]["buy"] = Decimal(total)
+            elif pt_type == PortfolioTxType.SELL:
+                base[account_id]["sell"] = Decimal(total)
+        return base
+
     async def save(self, tx: PortfolioTransaction) -> None:
         self.db.add(tx)
         await self.db.flush()
+
+    async def soft_delete_by_account_id(self, account_id: UUID) -> int:
+        """이 통장의 종목 매매이력 soft-delete — 통장 cascade용(전량매도 후 잔존분)."""
+        stmt = (
+            update(PortfolioTransaction)
+            .where(
+                and_(
+                    PortfolioTransaction.account_id == account_id,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .values(data_stat_cd=DataStatus.DELETED)
+            .execution_options(synchronize_session=False)
+        )
+        result = await self.db.execute(stmt)
+        return result.rowcount or 0
 
     async def find_sell_txs_by_item(
         self, item_id: UUID, from_date: date, to_date: date,
@@ -366,6 +442,22 @@ class PortfolioValueHistoryRepository:
             return
         self.db.add_all(histories)
         await self.db.flush()
+
+    async def soft_delete_by_account_id(self, account_id: UUID) -> int:
+        """이 통장의 종목 가치 박제 soft-delete — 통장 cascade용."""
+        stmt = (
+            update(PortfolioValueHistory)
+            .where(
+                and_(
+                    PortfolioValueHistory.account_id == account_id,
+                    PortfolioValueHistory.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .values(data_stat_cd=DataStatus.DELETED)
+            .execution_options(synchronize_session=False)
+        )
+        result = await self.db.execute(stmt)
+        return result.rowcount or 0
 
     async def delete_for_household_month(
         self, household_id: UUID, snapshot_date: date,

@@ -26,6 +26,7 @@ from app.domain.manual_asset.repository import ManualAssetRepository
 from app.domain.portfolio.repository import (
     PortfolioItemRepository,
     PortfolioTransactionRepository,
+    PortfolioValueHistoryRepository,
 )
 from app.domain.transaction.repository import TransactionRepository
 
@@ -118,6 +119,51 @@ async def _calc_investment_balance(
     )
 
 
+async def _load_balance_sources(
+    db: AsyncSession, accounts: list[Account],
+) -> tuple[dict, dict, dict, dict]:
+    """계좌 목록 잔액 계산에 필요한 데이터를 배치로 로드 — 계좌 수 무관 4쿼리(N+1 제거)."""
+    ids = [a.id for a in accounts]
+    inv_ids = [a.id for a in accounts if a.account_type == AccountType.INVESTMENT]
+    manual_ids = [
+        a.id for a in accounts if a.account_type in MANUAL_ASSET_ACCOUNT_TYPES
+    ]
+    tx_sums = await TransactionRepository(db).sum_for_accounts(ids)
+    pt_sums = await PortfolioTransactionRepository(db).sum_for_accounts(inv_ids)
+    items_map = await PortfolioItemRepository(db).find_active_by_account_ids(inv_ids)
+    manual_map = await ManualAssetRepository(db).sum_valuation_by_accounts(manual_ids)
+    return tx_sums, pt_sums, items_map, manual_map
+
+
+def _build_balance(
+    account: Account,
+    tx_sums: dict,
+    pt_sums: dict,
+    items_map: dict,
+    manual_map: dict,
+) -> BalanceSummary:
+    """배치 로드된 데이터로 잔액 조립 — _calc_balance 와 동일 로직의 N+1 없는 버전."""
+    s = tx_sums[account.id]
+    if account.account_type in MANUAL_ASSET_ACCOUNT_TYPES:
+        total = manual_map.get(account.id, Decimal("0"))
+        return BalanceSummary(balance=total + s["transfer_in"] - s["transfer_out"])
+    if account.account_type != AccountType.INVESTMENT:
+        return BalanceSummary(balance=_cash_flow(account.start_balance, s))
+    cash = _cash_flow(account.start_balance, s)
+    pt = pt_sums.get(account.id, {"buy": Decimal("0"), "sell": Decimal("0")})
+    cash = cash - pt["buy"] + pt["sell"]
+    items = items_map.get(account.id, [])
+    cost, valuation, profit_loss, rate = _summarize_holdings(items)
+    return BalanceSummary(
+        balance=cash + valuation,
+        cash=cash,
+        portfolio_cost=cost,
+        portfolio_valuation=valuation,
+        portfolio_profit_loss=profit_loss,
+        portfolio_profit_loss_rate=rate,
+    )
+
+
 def _build_response(account: Account, summary: BalanceSummary) -> AccountResponse:
     return AccountResponse(
         id=account.id,
@@ -149,18 +195,14 @@ async def list_accounts(
 ) -> list[AccountResponse]:
     """내부용 — sort_order 정렬 유지 (portfolio overview / snapshot 에서 호출)."""
     repo = AccountRepository(db)
-    tx_repo = TransactionRepository(db)
     accounts = await repo.search_by_household_id(
         household.id,
         search_term=search_term,
         account_type=account_type,
         is_archived=is_archived,
     )
-    responses = []
-    for a in accounts:
-        summary = await _calc_balance(tx_repo, a, db)
-        responses.append(_build_response(a, summary))
-    return responses
+    sources = await _load_balance_sources(db, accounts)
+    return [_build_response(a, _build_balance(a, *sources)) for a in accounts]
 
 
 async def list_accounts_cursor(
@@ -175,7 +217,6 @@ async def list_accounts_cursor(
 ) -> "CursorPage[AccountResponse]":
     """관리 페이지용 — frst_reg_dt DESC 정렬, cursor 무한 스크롤."""
     repo = AccountRepository(db)
-    tx_repo = TransactionRepository(db)
     rows = await repo.list_by_cursor(
         household.id,
         search_term=search_term,
@@ -187,10 +228,8 @@ async def list_accounts_cursor(
     has_next = len(rows) > limit
     rows = rows[:limit]
 
-    items: list[AccountResponse] = []
-    for a in rows:
-        summary = await _calc_balance(tx_repo, a, db)
-        items.append(_build_response(a, summary))
+    sources = await _load_balance_sources(db, rows)
+    items = [_build_response(a, _build_balance(a, *sources)) for a in rows]
 
     total_count = await repo.count_search(
         household.id,
@@ -283,16 +322,24 @@ async def delete_account(
     if not account or account.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
-    # 자식 존재 가드 — 거래(출금/입금 양방향) 또는 종목이 연결돼 있으면 삭제 차단.
-    # 이체는 양쪽 통장을 참조하므로 cascade 대신 차단이 안전(상대 통장 잔액 보호).
-    if await TransactionRepository(db).exists_active_by_account_id(account_id):
-        raise CustomException(ErrorCode.ACCOUNT_HAS_DEPENDENTS)
+    # 보유종목이 연결돼 있으면 차단 — 투자 데이터 보호(어떤 변경보다 먼저 검사).
     if await PortfolioItemRepository(db).count_active_by_account_id(account_id) > 0:
         raise CustomException(ErrorCode.ACCOUNT_HAS_DEPENDENTS)
 
+    # 자식 cascade soft-delete (단일 트랜잭션). 이체는 상대 통장이 살아있으면
+    # 행을 유지해 상대 잔액·통계를 보존하고(D안), 양쪽 다 죽은 이체만 삭제한다.
+    # 이체 처리는 통장 본체를 죽이기 전에 해야 자기 자신을 상대로 오판하지 않는다.
+    tx_repo = TransactionRepository(db)
+    await tx_repo.soft_delete_solo_by_account_id(account_id)
+    await tx_repo.soft_delete_transfers_with_dead_counterparty(account_id)
+    await ManualAssetRepository(db).soft_delete_by_account_id(account_id)
+    await PortfolioTransactionRepository(db).soft_delete_by_account_id(account_id)
+    await PortfolioValueHistoryRepository(db).soft_delete_by_account_id(account_id)
+    await AccountSnapshotRepository(db).soft_delete_by_account_id(account_id)
+
     account.data_stat_cd = DataStatus.DELETED
     await db.flush()
-    logger.info("통장 삭제 (account_id=%s)", account_id)
+    logger.info("통장 cascade 삭제 (account_id=%s)", account_id)
 
 
 async def get_account_detail(
