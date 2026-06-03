@@ -10,7 +10,7 @@
 """
 
 import logging
-from datetime import date, timedelta
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
@@ -477,10 +477,14 @@ async def get_portfolio_detail(
     return _build_response(item, {a.id: a for a in accounts})
 
 
-def _default_date_range(
+def _default_month_range(
     from_date: date | None, to_date: date | None,
 ) -> tuple[date, date]:
-    """기본: 최근 12개월 — account-snapshot/yearly 와 동일 컨벤션"""
+    """월별 스냅샷 추이 전용 — from/to 를 그달 1일로 정규화. 미지정 시 최근 12개월.
+
+    account-snapshot/yearly 와 동일 컨벤션. 일 단위 필터(매매손익)는 월 정규화하면
+    안 되므로 _default_day_range 를 쓴다.
+    """
     today = today_kst().replace(day=1)
     if not to_date:
         to_date = today
@@ -495,14 +499,18 @@ def _default_date_range(
     return from_date, to_date
 
 
-def _month_end(d: date) -> date:
-    """월 1일로 정규화된 날짜의 그 달 말일.
-
-    realized_pnl 쿼리는 `tx_date <= to_date`(일 단위)인데 _default_date_range 가
-    to_date 를 월 1일로 정규화하므로, 그 달 전체를 포함하려면 말일까지 넓혀야 한다.
-    """
-    nxt = date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
-    return nxt - timedelta(days=1)
+def _default_day_range(
+    from_date: date | None, to_date: date | None,
+) -> tuple[date, date]:
+    """매매손익 전용 — 일 단위 자유 필터. 월 정규화 없음. 미지정 시 최근 12개월."""
+    if not to_date:
+        to_date = today_kst()
+    if not from_date:
+        try:
+            from_date = to_date.replace(year=to_date.year - 1)
+        except ValueError:  # 2/29 → 전년 2/28
+            from_date = to_date.replace(year=to_date.year - 1, day=28)
+    return from_date, to_date
 
 
 def _to_history_point(row: PortfolioValueHistory) -> PortfolioValueHistoryPoint:
@@ -532,9 +540,9 @@ async def get_realized_pnl_by_item(
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
-    from_date, to_date = _default_date_range(from_date, to_date)
+    from_date, to_date = _default_day_range(from_date, to_date)
     sells = await PortfolioTransactionRepository(db).find_sell_txs_by_item(
-        item_id, from_date, _month_end(to_date),
+        item_id, from_date, to_date,
     )
 
     rows: list[RealizedPnlRow] = []
@@ -584,9 +592,9 @@ async def get_realized_pnl_by_account(
     여러 종목이 섞이므로 row 에 종목명(name)을 채운다. 기간 미지정 시 최근 12개월.
     구버전 SELL(realized=NULL) 은 0 으로 간주해 합계 왜곡 방지.
     """
-    from_date, to_date = _default_date_range(from_date, to_date)
+    from_date, to_date = _default_day_range(from_date, to_date)
     sells = await PortfolioTransactionRepository(db).find_sell_txs_by_account(
-        account_id, household.id, from_date, _month_end(to_date),
+        account_id, household.id, from_date, to_date,
     )
 
     rows: list[RealizedPnlRow] = []
@@ -636,7 +644,7 @@ async def get_value_history_by_account(
     if not accounts or accounts[0].household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
-    from_date, to_date = _default_date_range(from_date, to_date)
+    from_date, to_date = _default_month_range(from_date, to_date)
 
     history_repo = PortfolioValueHistoryRepository(db)
     rows = await history_repo.find_by_account_and_range(account_id, from_date, to_date)
@@ -679,7 +687,7 @@ async def get_value_history_by_item(
         raise CustomException(ErrorCode.NOT_FOUND)
     item = items[0]
 
-    from_date, to_date = _default_date_range(from_date, to_date)
+    from_date, to_date = _default_month_range(from_date, to_date)
 
     history_repo = PortfolioValueHistoryRepository(db)
     rows = await history_repo.find_by_item_and_range(item_id, from_date, to_date)
@@ -707,6 +715,46 @@ def _zero_summary() -> PortfolioOverviewSummary:
     )
 
 
+def _summarize_investment_accounts(
+    accounts: list[AccountResponse],
+) -> PortfolioOverviewSummary:
+    """INVESTMENT 계좌들의 총합 — balance/cash/valuation/cost/profit + 손익률. 순수 계산."""
+    total_balance = sum((a.balance for a in accounts), Decimal("0"))
+    total_cash = sum((a.cash or Decimal("0") for a in accounts), Decimal("0"))
+    total_valuation = sum(
+        (a.portfolio_valuation or Decimal("0") for a in accounts), Decimal("0"),
+    )
+    total_cost = sum(
+        (a.portfolio_cost or Decimal("0") for a in accounts), Decimal("0"),
+    )
+    total_profit = sum(
+        (a.portfolio_profit_loss or Decimal("0") for a in accounts), Decimal("0"),
+    )
+    total_rate = (
+        (total_profit / total_cost * Decimal("100")) if total_cost > 0 else Decimal("0")
+    )
+    return PortfolioOverviewSummary(
+        total_balance=total_balance,
+        total_cash=total_cash,
+        total_valuation=total_valuation,
+        total_cost=total_cost,
+        total_profit=total_profit,
+        total_rate=total_rate,
+    )
+
+
+def _group_portfolios_by_account(
+    items: list, account_map: dict[UUID, Account],
+) -> dict[UUID, list[PortfolioResponse]]:
+    """보유 종목을 계좌별 종목 응답 리스트로 그룹화 (account_map 에 없는 계좌는 제외)."""
+    grouped: dict[UUID, list[PortfolioResponse]] = {}
+    for it in items:
+        if it.account_id not in account_map:
+            continue
+        grouped.setdefault(it.account_id, []).append(_build_response(it, account_map))
+    return grouped
+
+
 async def get_portfolio_overview(
     db: AsyncSession, household: Household,
 ) -> PortfolioOverviewResponse:
@@ -722,46 +770,17 @@ async def get_portfolio_overview(
             summary=_zero_summary(), investment_accounts=[],
         )
 
-    # 모든 INVESTMENT 계좌의 종목 한 번에 조회 + 계좌별 그룹화
-    pi_repo = PortfolioItemRepository(db)
-    items = await pi_repo.find_active_by_household_id(household.id)
-    account_map = {a.id: a for a in await AccountRepository(db).find_by_ids(
-        [a.id for a in investment_accounts]
-    )}
-    portfolios_by_account: dict[UUID, list[PortfolioResponse]] = {}
-    for it in items:
-        if it.account_id not in account_map:
-            continue
-        portfolios_by_account.setdefault(it.account_id, []).append(
-            _build_response(it, account_map),
+    items = await PortfolioItemRepository(db).find_active_by_household_id(household.id)
+    account_map = {
+        a.id: a
+        for a in await AccountRepository(db).find_by_ids(
+            [a.id for a in investment_accounts]
         )
-
-    total_balance = sum((a.balance for a in investment_accounts), Decimal("0"))
-    total_cash = sum((a.cash or Decimal("0") for a in investment_accounts), Decimal("0"))
-    total_valuation = sum(
-        (a.portfolio_valuation or Decimal("0") for a in investment_accounts), Decimal("0"),
-    )
-    total_cost = sum(
-        (a.portfolio_cost or Decimal("0") for a in investment_accounts), Decimal("0"),
-    )
-    total_profit = sum(
-        (a.portfolio_profit_loss or Decimal("0") for a in investment_accounts), Decimal("0"),
-    )
-    total_rate = (
-        (total_profit / total_cost * Decimal("100")) if total_cost > 0 else Decimal("0")
-    )
-
-    summary = PortfolioOverviewSummary(
-        total_balance=total_balance,
-        total_cash=total_cash,
-        total_valuation=total_valuation,
-        total_cost=total_cost,
-        total_profit=total_profit,
-        total_rate=total_rate,
-    )
+    }
+    portfolios_by_account = _group_portfolios_by_account(items, account_map)
 
     return PortfolioOverviewResponse(
-        summary=summary,
+        summary=_summarize_investment_accounts(investment_accounts),
         investment_accounts=[
             InvestmentAccountWithPortfolios(
                 account=a,
