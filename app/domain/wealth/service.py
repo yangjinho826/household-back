@@ -50,6 +50,16 @@ def _slices_to_list(slices: dict[str, Decimal]) -> list[AssetClassSlice]:
     return result
 
 
+# 수동자산/저축 전용계좌 → 자산군 슬라이스 매핑.
+# INVESTMENT(현금 분리)·일반계좌(전액 현금)는 별도 처리하므로 여기 없음.
+_ASSET_CLASS_BY_TYPE = {
+    AccountType.REAL_ESTATE: AssetClass.REAL_ESTATE,
+    AccountType.PENSION: AssetClass.PENSION,
+    AccountType.COMMODITY: AssetClass.COMMODITY,
+    AccountType.SAVINGS_ASSET: AssetClass.SAVINGS,
+}
+
+
 def _build_allocation(
     accounts: list[AccountResponse], items: list[PortfolioItem],
 ) -> list[AssetClassSlice]:
@@ -65,14 +75,8 @@ def _build_allocation(
     for a in accounts:
         if a.account_type == AccountType.INVESTMENT:
             slices[AssetClass.CASH.value] += a.cash or Decimal("0")
-        elif a.account_type == AccountType.REAL_ESTATE:
-            slices[AssetClass.REAL_ESTATE.value] += a.balance
-        elif a.account_type == AccountType.PENSION:
-            slices[AssetClass.PENSION.value] += a.balance
-        elif a.account_type == AccountType.COMMODITY:
-            slices[AssetClass.COMMODITY.value] += a.balance
-        elif a.account_type == AccountType.SAVINGS_ASSET:
-            slices[AssetClass.SAVINGS.value] += a.balance
+        elif a.account_type in _ASSET_CLASS_BY_TYPE:
+            slices[_ASSET_CLASS_BY_TYPE[a.account_type].value] += a.balance
         else:
             slices[AssetClass.CASH.value] += a.balance
 
@@ -82,6 +86,25 @@ def _build_allocation(
     return _slices_to_list(slices)
 
 
+def _add_snapshot_to_month(
+    month: dict[str, Decimal],
+    account_type: AccountType | None,
+    balance: Decimal,
+    pvh_valuation: Decimal,
+) -> None:
+    """박제 스냅샷 balance 를 계좌타입별 자산군 슬라이스에 누적.
+
+    INVESTMENT 는 cash = balance − 그달 종목평가 역산(나머지는 종목 슬라이스에서 별도 합산).
+    수동자산 전용계좌는 매핑대로, 그 외 일반계좌는 전액 CASH.
+    """
+    if account_type == AccountType.INVESTMENT:
+        month[AssetClass.CASH.value] += balance - pvh_valuation
+    elif account_type in _ASSET_CLASS_BY_TYPE:
+        month[_ASSET_CLASS_BY_TYPE[account_type].value] += balance
+    else:
+        month[AssetClass.CASH.value] += balance
+
+
 def build_allocation_trend(
     account_snapshots: list[AccountSnapshot],
     portfolio_histories: list[PortfolioValueHistory],
@@ -89,11 +112,8 @@ def build_allocation_trend(
 ) -> list[AllocationTrendPoint]:
     """월별 자산군 배분추이 — 박제된 AccountSnapshot + PortfolioValueHistory 재구성.
 
-    - 종목: PVH valuation 을 전부 INVESTMENT 슬라이스로 합산(분류 없음).
-    - INVESTMENT 계좌 현금: AccountSnapshot.balance − 그 계좌 그달 PVH valuation 합
-      (`_calc_balance` 의 balance = cash + valuation 등식 역산).
-    - 그 외 계좌(LIVING/SAVINGS/OTHER): balance 전체가 CASH.
-    - REAL_ESTATE/PENSION/COMMODITY 전용계좌: balance 가 그달 평가액(roll-up 박제값).
+    종목 PVH valuation 은 전부 INVESTMENT 슬라이스로 합산하고, AccountSnapshot 은
+    계좌타입별로 분류(INVESTMENT 는 cash 역산). _add_snapshot_to_month 참고.
     """
     account_type_map = {a.id: a.account_type for a in accounts}
 
@@ -110,21 +130,12 @@ def build_allocation_trend(
         trend[h.snapshot_date][AssetClass.INVESTMENT.value] += h.valuation
 
     for s in account_snapshots:
-        account_type = account_type_map.get(s.account_id)
-        month = trend[s.snapshot_date]
-        if account_type == AccountType.REAL_ESTATE:
-            month[AssetClass.REAL_ESTATE.value] += s.balance
-        elif account_type == AccountType.PENSION:
-            month[AssetClass.PENSION.value] += s.balance
-        elif account_type == AccountType.COMMODITY:
-            month[AssetClass.COMMODITY.value] += s.balance
-        elif account_type == AccountType.SAVINGS_ASSET:
-            month[AssetClass.SAVINGS.value] += s.balance
-        elif account_type == AccountType.INVESTMENT:
-            cash = s.balance - pvh_by_account[(s.snapshot_date, s.account_id)]
-            month[AssetClass.CASH.value] += cash
-        else:
-            month[AssetClass.CASH.value] += s.balance
+        _add_snapshot_to_month(
+            trend[s.snapshot_date],
+            account_type_map.get(s.account_id),
+            s.balance,
+            pvh_by_account[(s.snapshot_date, s.account_id)],
+        )
 
     return [
         AllocationTrendPoint(snapshot_date=d, slices=_slices_to_list(slices))

@@ -166,6 +166,77 @@ def _split_ledger_cursor(cursor: str | None) -> tuple[str | None, Decimal | None
         return cursor, None
 
 
+def _ledger_filter(
+    account_id: UUID, year: int | None, month: int | None,
+) -> tuple[TransactionFilter, date | None]:
+    """거래 탭(year+month)이면 그 달 + 기준일=말일, 아니면 전체(기준일 없음)."""
+    if year is not None and month is not None:
+        return (
+            TransactionFilter(account_id=account_id, year=year, month=month),
+            date(year, month, monthrange(year, month)[1]),
+        )
+    return TransactionFilter(account_id=account_id), None
+
+
+async def _ledger_start_balance(
+    repo: TransactionRepository,
+    account: Account,
+    carry: Decimal | None,
+    balance_to_date: date | None,
+) -> Decimal:
+    """페이지 시작 잔액 — 이어지는 페이지면 carry, 첫 페이지면 기준일까지 누적 현금흐름."""
+    if carry is not None:
+        return carry
+    sums = await repo.sum_for_account(account.id, to_date=balance_to_date)
+    return (
+        account.start_balance
+        + sums["income"]
+        - sums["expense"]
+        - sums["transfer_out"]
+        + sums["transfer_in"]
+    )
+
+
+async def _load_ledger_maps(
+    db: AsyncSession, rows: list[Transaction],
+) -> tuple[dict, dict]:
+    """행에 등장한 계좌(이체 상대 포함)·카테고리 batch 로드."""
+    account_ids = {r.account_id for r in rows}
+    account_ids.update({r.to_account_id for r in rows if r.to_account_id})
+    category_ids = {r.category_id for r in rows if r.category_id}
+    accounts = await AccountRepository(db).find_by_ids(list(account_ids))
+    categories = await CategoryRepository(db).find_by_ids(list(category_ids))
+    return {a.id: a for a in accounts}, {c.id: c for c in categories}
+
+
+def _build_ledger_items(
+    rows: list[Transaction],
+    account_id: UUID,
+    account_map: dict,
+    category_map: dict,
+    start_balance: Decimal,
+) -> tuple[list[AccountLedgerItem], Decimal]:
+    """각 행에 running balance(거래 후 잔액)를 부여하며 역산. 끝 잔액(다음 페이지 carry) 반환.
+
+    desc 정렬이므로 첫 행이 start_balance, 한 칸 옛 거래로 내려갈 때마다 위 행의
+    signed_amount 를 빼서 아래 잔액을 만든다. 순수 계산.
+    """
+    items: list[AccountLedgerItem] = []
+    running = start_balance
+    for r in rows:
+        signed = _signed_amount(r, account_id)
+        base = _build_response(r, account_map, category_map)
+        items.append(
+            AccountLedgerItem(
+                **base.model_dump(),
+                signed_amount=signed,
+                balance_after=running,
+            )
+        )
+        running -= signed
+    return items, running
+
+
 async def list_account_ledger(
     db: AsyncSession,
     household: Household,
@@ -192,51 +263,18 @@ async def list_account_ledger(
         raise CustomException(ErrorCode.BAD_REQUEST)
 
     tx_cursor, carry = _split_ledger_cursor(cursor)
-    if year is not None and month is not None:
-        f = TransactionFilter(account_id=account_id, year=year, month=month)
-        balance_to_date: date | None = date(year, month, monthrange(year, month)[1])
-    else:
-        f = TransactionFilter(account_id=account_id)
-        balance_to_date = None
+    f, balance_to_date = _ledger_filter(account_id, year, month)
     rows = await repo.list_by_cursor(household.id, f, tx_cursor, limit)
     total = await repo.count(household.id, f)
 
     has_next = len(rows) > limit
     items_rows = rows[:limit]
 
-    # 시작 잔액 — 첫 페이지면 기준 시점까지의 누적 현금흐름 잔액, 이어지는 페이지면 carry.
-    if carry is not None:
-        running = carry
-    else:
-        sums = await repo.sum_for_account(account_id, to_date=balance_to_date)
-        running = (
-            account.start_balance
-            + sums["income"]
-            - sums["expense"]
-            - sums["transfer_out"]
-            + sums["transfer_in"]
-        )
-
-    account_ids = {r.account_id for r in items_rows}
-    account_ids.update({r.to_account_id for r in items_rows if r.to_account_id})
-    category_ids = {r.category_id for r in items_rows if r.category_id}
-    accounts = await AccountRepository(db).find_by_ids(list(account_ids))
-    categories = await CategoryRepository(db).find_by_ids(list(category_ids))
-    account_map = {a.id: a for a in accounts}
-    category_map = {c.id: c for c in categories}
-
-    items: list[AccountLedgerItem] = []
-    for r in items_rows:
-        signed = _signed_amount(r, account_id)
-        base = _build_response(r, account_map, category_map)
-        items.append(
-            AccountLedgerItem(
-                **base.model_dump(),
-                signed_amount=signed,
-                balance_after=running,
-            )
-        )
-        running -= signed  # 한 칸 옛 거래의 잔액
+    start_balance = await _ledger_start_balance(repo, account, carry, balance_to_date)
+    account_map, category_map = await _load_ledger_maps(db, items_rows)
+    items, running = _build_ledger_items(
+        items_rows, account_id, account_map, category_map, start_balance,
+    )
 
     next_cursor = None
     if has_next:
@@ -286,17 +324,20 @@ async def create_transaction(
     return await _single_response(db, tx)
 
 
-async def update_transaction(
+# 부분 업데이트(PATCH) 대상 필드 — req·tx 동일 이름. 추가 시 여기만 늘리면 된다.
+_TX_UPDATABLE_FIELDS = (
+    "tx_type", "amount", "tx_date", "account_id", "to_account_id",
+    "category_id", "paid_by_user_id", "fixed_expense_id", "memo",
+)
+
+
+async def _validate_update_fks(
     db: AsyncSession,
     household: Household,
-    tx_id: UUID,
+    tx: Transaction,
     req: TransactionUpdateRequest,
-) -> TransactionResponse:
-    repo = TransactionRepository(db)
-    tx = await repo.find_by_id(tx_id)
-    if not tx or tx.household_id != household.id:
-        raise CustomException(ErrorCode.NOT_FOUND)
-
+) -> None:
+    """변경 후 FK(계좌·이체상대·카테고리)가 같은 household 소속인지 검증."""
     new_account_id = req.account_id if req.account_id is not None else tx.account_id
     new_to_account_id = req.to_account_id if req.to_account_id is not None else tx.to_account_id
     new_category_id = req.category_id if req.category_id is not None else tx.category_id
@@ -310,29 +351,36 @@ async def update_transaction(
         db, household.id, fk_accounts, fk_categories, tx_type=new_tx_type,
     )
 
-    if req.tx_type is not None:
-        tx.tx_type = req.tx_type
-    if req.amount is not None:
-        tx.amount = req.amount
-    if req.tx_date is not None:
-        tx.tx_date = req.tx_date
-    if req.account_id is not None:
-        tx.account_id = req.account_id
-    if req.to_account_id is not None:
-        tx.to_account_id = req.to_account_id
-    if req.category_id is not None:
-        tx.category_id = req.category_id
-    if req.paid_by_user_id is not None:
-        tx.paid_by_user_id = req.paid_by_user_id
-    if req.fixed_expense_id is not None:
-        tx.fixed_expense_id = req.fixed_expense_id
-    if req.memo is not None:
-        tx.memo = req.memo
 
-    # type 별 일관성 재검증
+def _apply_partial_update(tx: Transaction, req: TransactionUpdateRequest) -> None:
+    """요청에 들어온(None 아닌) 필드만 tx 에 병합."""
+    for field in _TX_UPDATABLE_FIELDS:
+        value = getattr(req, field)
+        if value is not None:
+            setattr(tx, field, value)
+
+
+def _validate_transfer_consistency(tx: Transaction) -> None:
+    """TRANSFER 는 도착 계좌가 있어야 하고 출발=도착이면 안 된다."""
     if tx.tx_type == TxType.TRANSFER:
         if tx.to_account_id is None or tx.to_account_id == tx.account_id:
             raise CustomException(ErrorCode.BAD_REQUEST)
+
+
+async def update_transaction(
+    db: AsyncSession,
+    household: Household,
+    tx_id: UUID,
+    req: TransactionUpdateRequest,
+) -> TransactionResponse:
+    repo = TransactionRepository(db)
+    tx = await repo.find_by_id(tx_id)
+    if not tx or tx.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    await _validate_update_fks(db, household, tx, req)
+    _apply_partial_update(tx, req)
+    _validate_transfer_consistency(tx)
 
     await db.flush()
     return await _single_response(db, tx)

@@ -47,49 +47,74 @@ class BalanceSummary:
 async def _calc_balance(
     tx_repo: TransactionRepository, account: Account, db: AsyncSession,
 ) -> BalanceSummary:
-    """통장 balance 계산. INVESTMENT 통장이면 portfolio summary 도 같이 반환."""
-    # 수동자산 전용계좌(부동산·연금·금) — balance = 평가액 합 + 이체순액.
-    # 이체로 납입/회수가 잔액에 반영된다(지출/수입은 거래검증에서 차단).
+    """통장 balance 계산 — 계좌 타입별 전략으로 위임."""
     if account.account_type in MANUAL_ASSET_ACCOUNT_TYPES:
-        total = await ManualAssetRepository(db).sum_valuation_by_account(account.id)
-        sums = await tx_repo.sum_for_account(account.id)
-        balance = total + sums["transfer_in"] - sums["transfer_out"]
-        return BalanceSummary(balance=balance)
+        return await _calc_manual_asset_balance(tx_repo, account, db)
+    if account.account_type != AccountType.INVESTMENT:
+        return await _calc_cash_balance(tx_repo, account)
+    return await _calc_investment_balance(tx_repo, account, db)
 
-    sums = await tx_repo.sum_for_account(account.id)
-    cash = (
-        account.start_balance
+
+def _cash_flow(start_balance: Decimal, sums: dict[str, Decimal]) -> Decimal:
+    """거래 합계로 현금 잔액 산출 — 수입·이체입금은 +, 지출·이체출금은 -."""
+    return (
+        start_balance
         + sums["income"]
         - sums["expense"]
         - sums["transfer_out"]
         + sums["transfer_in"]
     )
 
-    if account.account_type != AccountType.INVESTMENT:
-        return BalanceSummary(balance=cash)
 
-    # INVESTMENT 통장 — portfolio_transactions + portfolio 평가금 합산
-    pt_repo = PortfolioTransactionRepository(db)
-    pi_repo = PortfolioItemRepository(db)
-
-    pt_sums = await pt_repo.sum_for_account(account.id)
-    cash -= pt_sums["buy"]
-    cash += pt_sums["sell"]
-
-    items = await pi_repo.find_active_by_account_id(account.id)
+def _summarize_holdings(items: list) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    """보유 종목 평가 — (매입원가, 평가액, 평가손익, 손익률). 순수 계산."""
     cost = sum((i.quantity * i.avg_price for i in items), Decimal("0.00"))
     valuation = sum((i.quantity * i.current_price for i in items), Decimal("0.00"))
     profit_loss = valuation - cost
-    profit_loss_rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0.00")
-    balance = cash + valuation
+    rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0.00")
+    return cost, valuation, profit_loss, rate
+
+
+async def _calc_manual_asset_balance(
+    tx_repo: TransactionRepository, account: Account, db: AsyncSession,
+) -> BalanceSummary:
+    """수동자산 전용계좌(부동산·연금·금) — 평가액 합 + 이체순액.
+
+    이체로 납입/회수가 잔액에 반영된다(지출/수입은 거래검증에서 차단).
+    """
+    total = await ManualAssetRepository(db).sum_valuation_by_account(account.id)
+    sums = await tx_repo.sum_for_account(account.id)
+    return BalanceSummary(balance=total + sums["transfer_in"] - sums["transfer_out"])
+
+
+async def _calc_cash_balance(
+    tx_repo: TransactionRepository, account: Account,
+) -> BalanceSummary:
+    """일반 거래계좌 — 현금흐름 잔액."""
+    sums = await tx_repo.sum_for_account(account.id)
+    return BalanceSummary(balance=_cash_flow(account.start_balance, sums))
+
+
+async def _calc_investment_balance(
+    tx_repo: TransactionRepository, account: Account, db: AsyncSession,
+) -> BalanceSummary:
+    """INVESTMENT 통장 — 현금흐름 + 매매현금 증감 + 보유종목 평가."""
+    sums = await tx_repo.sum_for_account(account.id)
+    cash = _cash_flow(account.start_balance, sums)
+
+    pt_sums = await PortfolioTransactionRepository(db).sum_for_account(account.id)
+    cash = cash - pt_sums["buy"] + pt_sums["sell"]
+
+    items = await PortfolioItemRepository(db).find_active_by_account_id(account.id)
+    cost, valuation, profit_loss, rate = _summarize_holdings(items)
 
     return BalanceSummary(
-        balance=balance,
+        balance=cash + valuation,
         cash=cash,
         portfolio_cost=cost,
         portfolio_valuation=valuation,
         portfolio_profit_loss=profit_loss,
-        portfolio_profit_loss_rate=profit_loss_rate,
+        portfolio_profit_loss_rate=rate,
     )
 
 
@@ -294,6 +319,40 @@ def _shift_months(d: date, delta: int) -> date:
     return date(total // 12, total % 12 + 1, 1)
 
 
+def _report_range(
+    from_date: date | None, to_date: date | None, this_month_first: date,
+) -> tuple[date, date]:
+    """리포트 기간 정규화 — to 미지정 시 이번달, from 미지정 시 to−11개월."""
+    to_resolved = to_date or this_month_first
+    from_resolved = from_date or _shift_months(to_resolved, -11)
+    return from_resolved, to_resolved
+
+
+def _snapshot_to_flow(s) -> AccountMonthlyFlow:
+    """박제된 월별 스냅샷 → 월간 유량 DTO."""
+    return AccountMonthlyFlow(
+        month_date=s.snapshot_date,
+        income=s.monthly_income,
+        expense=s.monthly_expense,
+        fixed_expense=s.monthly_fixed_expense,
+        balance=s.balance,
+    )
+
+
+async def _current_month_flow(
+    tx_repo: TransactionRepository, account_id: UUID, today: date, balance: Decimal,
+) -> AccountMonthlyFlow:
+    """아직 박제 전인 이번달 — 거래 실시간 집계 (잔액은 현재값)."""
+    m = await tx_repo.sum_by_account_for_month(account_id, today.year, today.month)
+    return AccountMonthlyFlow(
+        month_date=today.replace(day=1),
+        income=m["income"],
+        expense=m["expense"],
+        fixed_expense=m["fixed_expense"],
+        balance=balance,
+    )
+
+
 async def get_account_report(
     db: AsyncSession,
     household: Household,
@@ -306,48 +365,27 @@ async def get_account_report(
     박제된 과거 월 + 아직 박제 전인 이번달(실시간 집계)을 합쳐 내려준다.
     기본 기간은 최근 12개월(이번달 포함).
     """
-    repo = AccountRepository(db)
-    account = await repo.find_by_id(account_id)
+    account = await AccountRepository(db).find_by_id(account_id)
     if not account or account.household_id != household.id or account.data_stat_cd != DataStatus.ACTIVE:
         raise CustomException(ErrorCode.NOT_FOUND)
 
     today = _today_kst()
     this_month_first = today.replace(day=1)
-    if not to_date:
-        to_date = this_month_first
-    if not from_date:
-        from_date = _shift_months(to_date, -11)
+    from_date, to_date = _report_range(from_date, to_date, this_month_first)
 
-    snap_repo = AccountSnapshotRepository(db)
-    snaps = await snap_repo.find_by_account_and_range(account_id, from_date, to_date)
-
-    flows = [
-        AccountMonthlyFlow(
-            month_date=s.snapshot_date,
-            income=s.monthly_income,
-            expense=s.monthly_expense,
-            fixed_expense=s.monthly_fixed_expense,
-            balance=s.balance,
-        )
-        for s in snaps
-    ]
+    snaps = await AccountSnapshotRepository(db).find_by_account_and_range(
+        account_id, from_date, to_date,
+    )
+    flows = [_snapshot_to_flow(s) for s in snaps]
 
     tx_repo = TransactionRepository(db)
     summary = await _calc_balance(tx_repo, account, db)
 
-    # 이번달은 아직 박제 전 — 스냅샷에 없으면 실시간 집계로 보강 (잔액은 현재값)
     if to_date >= this_month_first and not any(
         s.snapshot_date == this_month_first for s in snaps
     ):
-        m = await tx_repo.sum_by_account_for_month(account_id, today.year, today.month)
         flows.append(
-            AccountMonthlyFlow(
-                month_date=this_month_first,
-                income=m["income"],
-                expense=m["expense"],
-                fixed_expense=m["fixed_expense"],
-                balance=summary.balance,
-            )
+            await _current_month_flow(tx_repo, account_id, today, summary.balance)
         )
 
     return AccountReportResponse(
