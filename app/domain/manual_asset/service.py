@@ -21,7 +21,9 @@ from app.domain.portfolio.enum import AssetClass
 
 logger = logging.getLogger(__name__)
 
-# asset_class → 전용 roll-up 계좌 메타 (type, 계좌명, color, icon). 없으면 lazy 생성.
+# asset_class → 전용계좌 메타 (type, 기본계좌명, color, icon).
+# 자산마다 1:1 통장을 만들며, 통장명은 자산명을 따르므로 여기 "기본계좌명"은
+# fallback 용. type/color/icon 매핑이 주 용도.
 _ROLLUP_ACCOUNT_META: dict[AssetClass, tuple[AccountType, str, str, str]] = {
     AssetClass.REAL_ESTATE: (
         AccountType.REAL_ESTATE, "부동산", "#8B5CF6", "building-estate",
@@ -31,6 +33,9 @@ _ROLLUP_ACCOUNT_META: dict[AssetClass, tuple[AccountType, str, str, str]] = {
     ),
     AssetClass.COMMODITY: (
         AccountType.COMMODITY, "금·원자재", "#F59E0B", "coin",
+    ),
+    AssetClass.SAVINGS: (
+        AccountType.SAVINGS_ASSET, "적금", "#10B981", "wallet",
     ),
 }
 
@@ -47,18 +52,16 @@ def _build_response(asset: ManualAsset) -> ManualAssetResponse:
     )
 
 
-async def _ensure_rollup_account(
-    db: AsyncSession, household: Household, asset_class: AssetClass,
+async def _create_asset_account(
+    db: AsyncSession, household: Household, asset_class: AssetClass, name: str,
 ) -> Account:
-    """asset_class 전용 roll-up 계좌 — 가계부당 1개. 없으면 생성."""
-    account_type, name, color, icon = _ROLLUP_ACCOUNT_META[asset_class]
-    repo = AccountRepository(db)
-    existing = await repo.search_by_household_id(
-        household.id, account_type=account_type.value,
-    )
-    if existing:
-        return existing[0]
+    """수동자산 전용계좌 — 자산마다 1:1 생성. 통장명은 자산명을 따른다.
 
+    거래 폼/이체에서 자산명("우리집 보증금")으로 노출되고, 자산별 이체 잔액이
+    분리된다(공유 roll-up 폐기).
+    """
+    account_type, _default_name, color, icon = _ROLLUP_ACCOUNT_META[asset_class]
+    repo = AccountRepository(db)
     account = Account(
         household_id=household.id,
         name=name,
@@ -72,8 +75,8 @@ async def _ensure_rollup_account(
     )
     await repo.save(account)
     logger.info(
-        "수동자산 전용계좌 생성 (type=%s, household_id=%s)",
-        account_type, household.id,
+        "수동자산 전용계좌 생성 (type=%s, name=%s, household_id=%s)",
+        account_type, name, household.id,
     )
     return account
 
@@ -87,7 +90,9 @@ async def create(
             raise CustomException(ErrorCode.NOT_FOUND)
         account_id = account.id
     else:
-        account = await _ensure_rollup_account(db, household, req.asset_class)
+        account = await _create_asset_account(
+            db, household, req.asset_class, req.name.strip(),
+        )
         account_id = account.id
 
     asset = ManualAsset(
@@ -117,8 +122,13 @@ async def update(
     if not asset or asset.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
+    # 1:1 전용계좌 — 이름/성격 변경을 통장에도 동기화
+    account = await AccountRepository(db).find_by_id(asset.account_id)
+
     if req.name is not None:
         asset.name = req.name.strip()
+        if account:
+            account.name = asset.name
     if req.current_valuation is not None:
         asset.current_valuation = req.current_valuation
     if req.valued_at is not None:
@@ -126,10 +136,13 @@ async def update(
     if req.is_archived is not None:
         asset.is_archived = req.is_archived
     if req.asset_class is not None and req.asset_class.value != asset.asset_class:
-        # 성격 전환 — 전용계좌도 재연결
+        # 성격 전환 — 1:1 통장의 type/color/icon 만 교체 (계좌 재생성 불필요)
         asset.asset_class = req.asset_class.value
-        account = await _ensure_rollup_account(db, household, req.asset_class)
-        asset.account_id = account.id
+        if account:
+            new_type, _name, color, icon = _ROLLUP_ACCOUNT_META[req.asset_class]
+            account.account_type = new_type.value
+            account.color = color
+            account.icon = icon
 
     await db.flush()
     return _build_response(asset)
@@ -150,5 +163,9 @@ async def delete(
     if not asset or asset.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
     asset.data_stat_cd = DataStatus.DELETED
+    # 1:1 전용계좌도 함께 soft-delete (고아 계좌 방지)
+    account = await AccountRepository(db).find_by_id(asset.account_id)
+    if account:
+        account.data_stat_cd = DataStatus.DELETED
     await db.flush()
-    logger.info("수동자산 삭제 (asset_id=%s)", asset_id)
+    logger.info("수동자산 삭제 (asset_id=%s, account_id=%s)", asset_id, asset.account_id)

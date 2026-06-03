@@ -70,6 +70,8 @@ class AccountResponse(CamelBaseModel):
     icon: str | None
     sort_order: int
     is_archived: bool
+    # 수동자산 통장(부동산·연금·금)이면 true — 프론트 거래폼에서 이체 전용 분기
+    is_manual_asset: bool = False
 
     # INVESTMENT 통장 전용 (LIVING/SAVINGS 는 None)
     cash: Money | None = None

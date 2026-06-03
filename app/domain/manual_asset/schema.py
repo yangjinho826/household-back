@@ -14,6 +14,7 @@ _MANUAL_ASSET_CLASSES = {
     AssetClass.REAL_ESTATE,
     AssetClass.PENSION,
     AssetClass.COMMODITY,
+    AssetClass.SAVINGS,
 }
 
 

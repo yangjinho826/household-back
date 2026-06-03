@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.pagination import CursorPage
-from app.domain.account.enum import AccountType
+from app.domain.account.enum import MANUAL_ASSET_ACCOUNT_TYPES, AccountType
 from app.domain.account.model import Account
 from app.domain.account.repository import AccountRepository
 from app.domain.account.schema import (
@@ -48,14 +48,13 @@ async def _calc_balance(
     tx_repo: TransactionRepository, account: Account, db: AsyncSession,
 ) -> BalanceSummary:
     """통장 balance 계산. INVESTMENT 통장이면 portfolio summary 도 같이 반환."""
-    # 부동산·연금·금 전용계좌 — 수동자산 평가액 합이 곧 balance (거래/현금 없음)
-    if account.account_type in (
-        AccountType.REAL_ESTATE,
-        AccountType.PENSION,
-        AccountType.COMMODITY,
-    ):
+    # 수동자산 전용계좌(부동산·연금·금) — balance = 평가액 합 + 이체순액.
+    # 이체로 납입/회수가 잔액에 반영된다(지출/수입은 거래검증에서 차단).
+    if account.account_type in MANUAL_ASSET_ACCOUNT_TYPES:
         total = await ManualAssetRepository(db).sum_valuation_by_account(account.id)
-        return BalanceSummary(balance=total)
+        sums = await tx_repo.sum_for_account(account.id)
+        balance = total + sums["transfer_in"] - sums["transfer_out"]
+        return BalanceSummary(balance=balance)
 
     sums = await tx_repo.sum_for_account(account.id)
     cash = (
@@ -106,6 +105,7 @@ def _build_response(account: Account, summary: BalanceSummary) -> AccountRespons
         icon=account.icon,
         sort_order=account.sort_order,
         is_archived=account.is_archived,
+        is_manual_asset=account.account_type in MANUAL_ASSET_ACCOUNT_TYPES,
         cash=summary.cash,
         portfolio_cost=summary.portfolio_cost,
         portfolio_valuation=summary.portfolio_valuation,

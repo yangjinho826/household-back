@@ -21,6 +21,7 @@ class AssetClass(StrEnum):
     CASH = "CASH"
     REAL_ESTATE = "REAL_ESTATE"
     PENSION = "PENSION"
+    SAVINGS = "SAVINGS"  # 적금 (수동자산)
     OTHER = "OTHER"
 
 

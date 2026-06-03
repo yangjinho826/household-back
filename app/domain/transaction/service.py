@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
-from app.domain.account.enum import AccountType
+from app.domain.account.enum import MANUAL_ASSET_ACCOUNT_TYPES, AccountType
 from app.domain.account.repository import AccountRepository
 from app.domain.category.repository import CategoryRepository
 from app.domain.household.model import Household
@@ -44,8 +44,13 @@ async def _validate_fk_belong_to_household(
     household_id: UUID,
     account_ids: list[UUID],
     category_ids: list[UUID],
+    tx_type: TxType | None = None,
 ) -> None:
-    """account/category 가 모두 같은 household 소속인지 검증"""
+    """account/category 가 모두 같은 household 소속인지 검증.
+
+    tx_type 이 주어지면 수동자산 통장(부동산·연금·금)은 이체(TRANSFER)만 허용 —
+    지출/수입이 수동자산 통장에 걸리면 BAD_REQUEST.
+    """
     if account_ids:
         accounts = await AccountRepository(db).find_by_ids(account_ids)
         if len(accounts) != len(set(account_ids)):
@@ -53,6 +58,10 @@ async def _validate_fk_belong_to_household(
         for a in accounts:
             if a.household_id != household_id or a.data_stat_cd != DataStatus.ACTIVE:
                 raise CustomException(ErrorCode.NOT_FOUND)
+        if tx_type is not None and tx_type != TxType.TRANSFER:
+            for a in accounts:
+                if a.account_type in MANUAL_ASSET_ACCOUNT_TYPES:
+                    raise CustomException(ErrorCode.BAD_REQUEST)
     if category_ids:
         categories = await CategoryRepository(db).find_by_ids(category_ids)
         if len(categories) != len(set(category_ids)):
@@ -255,7 +264,9 @@ async def create_transaction(
     if req.to_account_id is not None:
         account_ids.append(req.to_account_id)
     category_ids = [req.category_id] if req.category_id else []
-    await _validate_fk_belong_to_household(db, household.id, account_ids, category_ids)
+    await _validate_fk_belong_to_household(
+        db, household.id, account_ids, category_ids, tx_type=req.tx_type,
+    )
 
     tx = Transaction(
         household_id=household.id,
@@ -294,7 +305,10 @@ async def update_transaction(
     if new_to_account_id is not None:
         fk_accounts.append(new_to_account_id)
     fk_categories = [new_category_id] if new_category_id else []
-    await _validate_fk_belong_to_household(db, household.id, fk_accounts, fk_categories)
+    new_tx_type = req.tx_type if req.tx_type is not None else TxType(tx.tx_type)
+    await _validate_fk_belong_to_household(
+        db, household.id, fk_accounts, fk_categories, tx_type=new_tx_type,
+    )
 
     if req.tx_type is not None:
         tx.tx_type = req.tx_type

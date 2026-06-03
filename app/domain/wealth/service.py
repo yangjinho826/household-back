@@ -71,6 +71,8 @@ def _build_allocation(
             slices[AssetClass.PENSION.value] += a.balance
         elif a.account_type == AccountType.COMMODITY:
             slices[AssetClass.COMMODITY.value] += a.balance
+        elif a.account_type == AccountType.SAVINGS_ASSET:
+            slices[AssetClass.SAVINGS.value] += a.balance
         else:
             slices[AssetClass.CASH.value] += a.balance
 
@@ -116,6 +118,8 @@ def build_allocation_trend(
             month[AssetClass.PENSION.value] += s.balance
         elif account_type == AccountType.COMMODITY:
             month[AssetClass.COMMODITY.value] += s.balance
+        elif account_type == AccountType.SAVINGS_ASSET:
+            month[AssetClass.SAVINGS.value] += s.balance
         elif account_type == AccountType.INVESTMENT:
             cash = s.balance - pvh_by_account[(s.snapshot_date, s.account_id)]
             month[AssetClass.CASH.value] += cash
