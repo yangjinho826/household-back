@@ -16,6 +16,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.dates import today_kst
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
 from app.domain.account.enum import AccountType
@@ -204,7 +205,7 @@ async def buy(
         pt_type=PortfolioTxType.BUY,
         quantity=req.quantity,
         price=req.price,
-        tx_date=req.tx_date or date.today(),
+        tx_date=req.tx_date or today_kst(),
         memo=req.memo,
         data_stat_cd=DataStatus.ACTIVE,
     )
@@ -289,7 +290,7 @@ async def sell(
         pt_type=PortfolioTxType.SELL,
         quantity=req.quantity,
         price=req.sell_price,
-        tx_date=req.tx_date or date.today(),
+        tx_date=req.tx_date or today_kst(),
         memo=req.memo,
         realized_pnl=realized_pnl,
         realized_cost_basis=realized_cost,
@@ -452,7 +453,7 @@ def _default_date_range(
     from_date: date | None, to_date: date | None,
 ) -> tuple[date, date]:
     """기본: 최근 12개월 — account-snapshot/yearly 와 동일 컨벤션"""
-    today = date.today().replace(day=1)
+    today = today_kst().replace(day=1)
     if not to_date:
         to_date = today
     else:
