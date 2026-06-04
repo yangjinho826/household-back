@@ -2,12 +2,20 @@
 
 ## Goal
 
-**가계부 × 자산 통합 — 수동자산을 통장+평가조정 거래로 통합** (이중계상 버그 해결).
-부동산·연금·금·적금을 ManualAsset+전용계좌로 이원화하던 걸 account 일원화. 가치변동=VALUATION 거래.
+**평가금 수정 UX를 거래 화면으로 이동 + 모바일 삭제버튼 수정 + 도커 DB 포트** (2026-06-04, 자산통합 후속).
 
 ## Status
 
-**백엔드 자산통합 + 프론트(C) 전부 완료. 미커밋 — 커밋 대기.**
+**3건 전부 완료. 미커밋 — 커밋 대기.** (`npm run build`/tsc/eslint 통과)
+
+- **#1 모바일 삭제버튼**: `form-sheet.tsx` Drawer가 BottomTab(z-index 500, 64px) 높이 보정 누락 → 삭제버튼이 탭바 밑에 깔려 클릭 차단. `household-switcher.tsx`의 보정 공식(`maxHeight: min(90dvh, 100dvh - bottom-tab-h - safe-bottom)` / `paddingBottom: bottom-tab-h + safe-bottom + 16`) 적용.
+- **#2 평가금→거래**: 거래 폼 맨 위 **통장 칩 리스트**(전체 계좌) + 선택 타입 분기. 수동자산→평가조정(새 평가액 절대값 입력, diff를 VALUATION 거래로 생성), 일반→기존 폼. `use-form.tsx`에 accounts param·txType 동기화 effect·VALUATION submit 분기 추가. **자산 폼(asset-form/use-asset-form)은 초기금(startBalance) 직접수정으로 복귀** — 자동 VALUATION 생성 제거. 백엔드 무변경(VALUATION 거래·form-options 전체계좌·account update startBalance 이미 완비).
+- **#3 도커 포트**: base compose 불변, git-ignore된 `docker-compose.override.yml`로 `127.0.0.1:5432` localhost 한정 노출. `.gitignore`에 override 추가.
+- **#2 후속 UX**: 거래 폼 통장 칩을 **가로 스크롤 한 줄**(통장 많을 때 대비).
+- **#2 후속2 — 거래 필터 전체 통장**: 거래 탭 계좌 필터에 **전체 통장 노출**(적금/수동자산/투자 다 보임, 이동 X 탭 안 필터). 백엔드 `list_account_ledger` **타입 가드 제거**(전 타입 허용) + `_ledger_start_balance`에 `sums["valuation_net"]` 추가 → 수동자산 평가조정 running balance 정확. `_LEDGER_ACCOUNT_TYPES` 상수 삭제(+AccountType import 정리). INVESTMENT은 매매현금이 거래 테이블 밖이라 잔액 부정확 → 프론트에서 `showBalance=false`로 **잔액 컬럼만 숨김**(거래는 표시). plumbing: transactions-section→AccountLedgerView→LedgerRow. LedgerRow에 VALUATION "평가조정" 보조라벨. **백엔드 변경 → 서버 재기동 필요.**
+
+이전 마일스톤(자산통합):
+**백엔드 자산통합 + 프론트(C) 전부 완료. 커밋됨(77bb340까지).**
 
 C(프론트) 완료 (2026-06-04):
 - 백엔드 단계1: `account/enum.py` `MANUAL_ASSET_DEFAULT_META` + `create_account` 기본 color/icon 부여 (QA verified: REAL_ESTATE → #8B5CF6/building-estate)
