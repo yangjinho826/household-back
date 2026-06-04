@@ -12,7 +12,7 @@ from app.domain.account.schema import AccountResponse
 from app.domain.category.schema import CategoryResponse
 from app.domain.fixed.schema import FixedResponse
 from app.domain.stats.schema import CategoryStatsItem
-from app.domain.transaction.enum import TxType
+from app.domain.transaction.enum import TxType, ValuationDirection
 
 
 class TransactionListQuery(CamelBaseModel):
@@ -45,6 +45,8 @@ class TransactionCreateRequest(CamelBaseModel):
     paid_by_user_id: UUID | None = None
     fixed_expense_id: UUID | None = None
     memo: str | None = None
+    # 평가조정(VALUATION) 거래의 증감 방향 — VALUATION 일 때만 허용/필수.
+    valuation_direction: ValuationDirection | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> "TransactionCreateRequest":
@@ -69,6 +71,14 @@ class TransactionCreateRequest(CamelBaseModel):
         else:
             if self.fixed_expense_id is not None:
                 raise CustomException(ErrorCode.BAD_REQUEST)
+        # 평가조정(VALUATION): 방향 필수 + category 금지 (to_account/fixed 는 위 else 에서 금지됨).
+        if self.tx_type == TxType.VALUATION:
+            if self.valuation_direction is None:
+                raise CustomException(ErrorCode.BAD_REQUEST)
+            if self.category_id is not None:
+                raise CustomException(ErrorCode.BAD_REQUEST)
+        elif self.valuation_direction is not None:
+            raise CustomException(ErrorCode.BAD_REQUEST)
         return self
 
 
@@ -82,6 +92,7 @@ class TransactionUpdateRequest(CamelBaseModel):
     paid_by_user_id: UUID | None = None
     fixed_expense_id: UUID | None = None
     memo: str | None = None
+    valuation_direction: ValuationDirection | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> "TransactionUpdateRequest":
@@ -112,6 +123,7 @@ class TransactionResponse(CamelBaseModel):
     category_icon: str | None
     paid_by_user_id: UUID | None
     fixed_expense_id: UUID | None
+    valuation_direction: ValuationDirection | None
     memo: str | None
 
 

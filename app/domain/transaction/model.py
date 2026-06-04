@@ -34,3 +34,5 @@ class Transaction(BaseEntity):
         nullable=True,
     )
     memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 평가조정(VALUATION) 거래의 증감 방향 — INCREASE/DECREASE. 그 외 타입은 NULL.
+    valuation_direction: Mapped[str | None] = mapped_column(String(20), nullable=True)

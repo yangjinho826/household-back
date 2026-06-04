@@ -22,7 +22,6 @@ from app.domain.account.schema import (
 )
 from app.domain.account_snapshot.repository import AccountSnapshotRepository
 from app.domain.household.model import Household
-from app.domain.manual_asset.repository import ManualAssetRepository
 from app.domain.portfolio.repository import (
     PortfolioItemRepository,
     PortfolioTransactionRepository,
@@ -48,22 +47,24 @@ class BalanceSummary:
 async def _calc_balance(
     tx_repo: TransactionRepository, account: Account, db: AsyncSession,
 ) -> BalanceSummary:
-    """통장 balance 계산 — 계좌 타입별 전략으로 위임."""
-    if account.account_type in MANUAL_ASSET_ACCOUNT_TYPES:
-        return await _calc_manual_asset_balance(tx_repo, account, db)
+    """통장 balance 계산 — 계좌 타입별 전략으로 위임.
+
+    수동자산(부동산·연금·금·적금)도 일반계좌와 동일 공식: start_balance + 거래합(평가조정 포함).
+    """
     if account.account_type != AccountType.INVESTMENT:
         return await _calc_cash_balance(tx_repo, account)
     return await _calc_investment_balance(tx_repo, account, db)
 
 
 def _cash_flow(start_balance: Decimal, sums: dict[str, Decimal]) -> Decimal:
-    """거래 합계로 현금 잔액 산출 — 수입·이체입금은 +, 지출·이체출금은 -."""
+    """거래 합계로 잔액 산출 — 수입·이체입금 +, 지출·이체출금 -, 평가조정은 방향대로(valuation_net)."""
     return (
         start_balance
         + sums["income"]
         - sums["expense"]
         - sums["transfer_out"]
         + sums["transfer_in"]
+        + sums["valuation_net"]
     )
 
 
@@ -74,18 +75,6 @@ def _summarize_holdings(items: list) -> tuple[Decimal, Decimal, Decimal, Decimal
     profit_loss = valuation - cost
     rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0.00")
     return cost, valuation, profit_loss, rate
-
-
-async def _calc_manual_asset_balance(
-    tx_repo: TransactionRepository, account: Account, db: AsyncSession,
-) -> BalanceSummary:
-    """수동자산 전용계좌(부동산·연금·금) — 평가액 합 + 이체순액.
-
-    이체로 납입/회수가 잔액에 반영된다(지출/수입은 거래검증에서 차단).
-    """
-    total = await ManualAssetRepository(db).sum_valuation_by_account(account.id)
-    sums = await tx_repo.sum_for_account(account.id)
-    return BalanceSummary(balance=total + sums["transfer_in"] - sums["transfer_out"])
 
 
 async def _calc_cash_balance(
@@ -121,18 +110,14 @@ async def _calc_investment_balance(
 
 async def _load_balance_sources(
     db: AsyncSession, accounts: list[Account],
-) -> tuple[dict, dict, dict, dict]:
-    """계좌 목록 잔액 계산에 필요한 데이터를 배치로 로드 — 계좌 수 무관 4쿼리(N+1 제거)."""
+) -> tuple[dict, dict, dict]:
+    """계좌 목록 잔액 계산에 필요한 데이터를 배치로 로드 — 계좌 수 무관 3쿼리(N+1 제거)."""
     ids = [a.id for a in accounts]
     inv_ids = [a.id for a in accounts if a.account_type == AccountType.INVESTMENT]
-    manual_ids = [
-        a.id for a in accounts if a.account_type in MANUAL_ASSET_ACCOUNT_TYPES
-    ]
     tx_sums = await TransactionRepository(db).sum_for_accounts(ids)
     pt_sums = await PortfolioTransactionRepository(db).sum_for_accounts(inv_ids)
     items_map = await PortfolioItemRepository(db).find_active_by_account_ids(inv_ids)
-    manual_map = await ManualAssetRepository(db).sum_valuation_by_accounts(manual_ids)
-    return tx_sums, pt_sums, items_map, manual_map
+    return tx_sums, pt_sums, items_map
 
 
 def _build_balance(
@@ -140,13 +125,9 @@ def _build_balance(
     tx_sums: dict,
     pt_sums: dict,
     items_map: dict,
-    manual_map: dict,
 ) -> BalanceSummary:
     """배치 로드된 데이터로 잔액 조립 — _calc_balance 와 동일 로직의 N+1 없는 버전."""
     s = tx_sums[account.id]
-    if account.account_type in MANUAL_ASSET_ACCOUNT_TYPES:
-        total = manual_map.get(account.id, Decimal("0"))
-        return BalanceSummary(balance=total + s["transfer_in"] - s["transfer_out"])
     if account.account_type != AccountType.INVESTMENT:
         return BalanceSummary(balance=_cash_flow(account.start_balance, s))
     cash = _cash_flow(account.start_balance, s)
@@ -332,7 +313,6 @@ async def delete_account(
     tx_repo = TransactionRepository(db)
     await tx_repo.soft_delete_solo_by_account_id(account_id)
     await tx_repo.soft_delete_transfers_with_dead_counterparty(account_id)
-    await ManualAssetRepository(db).soft_delete_by_account_id(account_id)
     await PortfolioTransactionRepository(db).soft_delete_by_account_id(account_id)
     await PortfolioValueHistoryRepository(db).soft_delete_by_account_id(account_id)
     await AccountSnapshotRepository(db).soft_delete_by_account_id(account_id)

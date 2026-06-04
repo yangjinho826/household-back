@@ -14,7 +14,7 @@ from app.domain.category.enum import CategoryKind
 from app.domain.category.repository import CategoryRepository
 from app.domain.fixed.repository import FixedRepository
 from app.domain.household.model import Household
-from app.domain.transaction.enum import TxType
+from app.domain.transaction.enum import TxType, ValuationDirection
 from app.domain.transaction.model import Transaction
 from app.domain.transaction.repository import (
     TransactionFilter,
@@ -81,7 +81,13 @@ async def _validate_fk_belong_to_household(
         for a in accounts:
             if a.household_id != household_id or a.data_stat_cd != DataStatus.ACTIVE:
                 raise CustomException(ErrorCode.NOT_FOUND)
-        if tx_type is not None and tx_type != TxType.TRANSFER:
+        if tx_type == TxType.VALUATION:
+            # 평가조정은 수동자산 통장에만 의미 — 그 외 통장이면 차단.
+            for a in accounts:
+                if a.account_type not in MANUAL_ASSET_ACCOUNT_TYPES:
+                    raise CustomException(ErrorCode.BAD_REQUEST)
+        elif tx_type is not None and tx_type != TxType.TRANSFER:
+            # 수동자산 통장엔 이체·평가조정만 허용 — 지출/수입 차단.
             for a in accounts:
                 if a.account_type in MANUAL_ASSET_ACCOUNT_TYPES:
                     raise CustomException(ErrorCode.BAD_REQUEST)
@@ -161,6 +167,11 @@ def _build_response(
         category_icon=category.icon if category else None,
         paid_by_user_id=tx.paid_by_user_id,
         fixed_expense_id=tx.fixed_expense_id,
+        valuation_direction=(
+            ValuationDirection(tx.valuation_direction)
+            if tx.valuation_direction
+            else None
+        ),
         memo=tx.memo,
     )
 
@@ -171,6 +182,12 @@ def _signed_amount(tx: Transaction, account_id: UUID) -> Decimal:
         return tx.amount  # 이체 입금
     if tx.tx_type == TxType.INCOME:
         return tx.amount
+    if tx.tx_type == TxType.VALUATION:
+        return (
+            tx.amount
+            if tx.valuation_direction == ValuationDirection.INCREASE
+            else -tx.amount
+        )
     return -tx.amount  # EXPENSE/FIXED_EXPENSE/이체 출금
 
 
@@ -343,6 +360,11 @@ async def create_transaction(
         paid_by_user_id=req.paid_by_user_id or current_user.id,
         fixed_expense_id=req.fixed_expense_id,
         memo=req.memo,
+        valuation_direction=(
+            req.valuation_direction.value
+            if req.tx_type == TxType.VALUATION and req.valuation_direction
+            else None
+        ),
         data_stat_cd=DataStatus.ACTIVE,
     )
     await TransactionRepository(db).save(tx)
@@ -354,6 +376,7 @@ async def create_transaction(
 _TX_UPDATABLE_FIELDS = (
     "tx_type", "amount", "tx_date", "account_id", "to_account_id",
     "category_id", "paid_by_user_id", "fixed_expense_id", "memo",
+    "valuation_direction",
 )
 
 

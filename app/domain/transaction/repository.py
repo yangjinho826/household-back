@@ -9,7 +9,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.enums.data_status import DataStatus
 from app.domain.account.model import Account
-from app.domain.transaction.enum import TxType
+from app.domain.transaction.enum import TxType, ValuationDirection
 from app.domain.transaction.model import Transaction
 
 
@@ -203,6 +203,7 @@ class TransactionRepository:
                 Transaction.tx_type,
                 Transaction.account_id,
                 Transaction.to_account_id,
+                Transaction.valuation_direction,
                 func.sum(Transaction.amount).label("total"),
             )
             .where(and_(*conds))
@@ -210,6 +211,7 @@ class TransactionRepository:
                 Transaction.tx_type,
                 Transaction.account_id,
                 Transaction.to_account_id,
+                Transaction.valuation_direction,
             )
         )
 
@@ -218,8 +220,9 @@ class TransactionRepository:
             "expense": Decimal("0"),
             "transfer_out": Decimal("0"),
             "transfer_in": Decimal("0"),
+            "valuation_net": Decimal("0"),
         }
-        for tx_type, acc_id, to_acc_id, total in result.all():
+        for tx_type, acc_id, to_acc_id, direction, total in result.all():
             if tx_type == TxType.INCOME and acc_id == account_id:
                 sums["income"] += total
             elif (
@@ -232,6 +235,12 @@ class TransactionRepository:
                     sums["transfer_out"] += total
                 if to_acc_id == account_id:
                     sums["transfer_in"] += total
+            elif tx_type == TxType.VALUATION and acc_id == account_id:
+                # 평가조정 — 현금 유입 없는 가치 증감. 방향대로 잔액에만 반영.
+                if direction == ValuationDirection.INCREASE:
+                    sums["valuation_net"] += total
+                else:
+                    sums["valuation_net"] -= total
         return sums
 
     async def sum_for_accounts(
@@ -245,6 +254,7 @@ class TransactionRepository:
                 "expense": Decimal("0"),
                 "transfer_out": Decimal("0"),
                 "transfer_in": Decimal("0"),
+                "valuation_net": Decimal("0"),
             }
             for aid in account_ids
         }
@@ -256,6 +266,7 @@ class TransactionRepository:
                 Transaction.tx_type,
                 Transaction.account_id,
                 Transaction.to_account_id,
+                Transaction.valuation_direction,
                 func.sum(Transaction.amount).label("total"),
             )
             .where(
@@ -271,9 +282,10 @@ class TransactionRepository:
                 Transaction.tx_type,
                 Transaction.account_id,
                 Transaction.to_account_id,
+                Transaction.valuation_direction,
             )
         )
-        for tx_type, acc_id, to_acc_id, total in result.all():
+        for tx_type, acc_id, to_acc_id, direction, total in result.all():
             if acc_id in id_set:
                 if tx_type == TxType.INCOME:
                     base[acc_id]["income"] += total
@@ -281,6 +293,11 @@ class TransactionRepository:
                     base[acc_id]["expense"] += total
                 elif tx_type == TxType.TRANSFER:
                     base[acc_id]["transfer_out"] += total
+                elif tx_type == TxType.VALUATION:
+                    if direction == ValuationDirection.INCREASE:
+                        base[acc_id]["valuation_net"] += total
+                    else:
+                        base[acc_id]["valuation_net"] -= total
             if to_acc_id in id_set and tx_type == TxType.TRANSFER:
                 base[to_acc_id]["transfer_in"] += total
         return base
@@ -432,6 +449,8 @@ class TransactionRepository:
                     Transaction.data_stat_cd == DataStatus.ACTIVE,
                     Transaction.tx_date >= first_day,
                     Transaction.tx_date <= last_day,
+                    # 평가조정은 수입/지출/이체가 아니라 달력 일별 집계·카운트에서 제외.
+                    Transaction.tx_type != TxType.VALUATION,
                 )
             )
             .group_by(Transaction.tx_date, Transaction.tx_type)

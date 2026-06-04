@@ -18,7 +18,6 @@ from app.domain.household.repository import (
     HouseholdMemberRepository,
     HouseholdRepository,
 )
-from app.domain.manual_asset.model import ManualAsset
 from app.domain.portfolio.model import (
     PortfolioItem,
     PortfolioTransaction,
@@ -141,7 +140,6 @@ _CHILD_MODELS_WITH_HOUSEHOLD_ID = (
     PortfolioTransaction,
     PortfolioValueHistory,
     FixedExpense,
-    ManualAsset,
     HouseholdMember,
 )
 

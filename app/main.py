@@ -20,7 +20,6 @@ from app.domain.fixed.router import router as fixed_router
 from app.domain.health.router import router as health_router
 from app.domain.home.router import router as home_router
 from app.domain.household.router import router as household_router
-from app.domain.manual_asset.router import router as manual_asset_router
 from app.domain.portfolio.router import router as portfolio_router
 from app.domain.settings.router import router as settings_router
 from app.domain.stats.router import router as stats_router
@@ -68,7 +67,6 @@ app.include_router(transaction_router)
 app.include_router(fixed_router)
 app.include_router(account_snapshot_router)
 app.include_router(portfolio_router)
-app.include_router(manual_asset_router)
 app.include_router(stats_router)
 app.include_router(home_router)
 app.include_router(wealth_router)
