@@ -22,3 +22,13 @@ MANUAL_ASSET_ACCOUNT_TYPES = (
     AccountType.COMMODITY,
     AccountType.SAVINGS_ASSET,
 )
+
+
+# 수동자산 type별 기본 color/icon — 통장 생성 시 미지정이면 부여.
+# (manual_asset 도메인 제거 전 _ROLLUP_ACCOUNT_META 의 color/icon 승계)
+MANUAL_ASSET_DEFAULT_META: dict[AccountType, tuple[str, str]] = {
+    AccountType.REAL_ESTATE: ("#8B5CF6", "building-estate"),
+    AccountType.PENSION: ("#EC4899", "pig-money"),
+    AccountType.COMMODITY: ("#F59E0B", "coin"),
+    AccountType.SAVINGS_ASSET: ("#10B981", "wallet"),
+}

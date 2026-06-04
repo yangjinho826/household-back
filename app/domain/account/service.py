@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.pagination import CursorPage
-from app.domain.account.enum import MANUAL_ASSET_ACCOUNT_TYPES, AccountType
+from app.domain.account.enum import (
+    MANUAL_ASSET_ACCOUNT_TYPES,
+    MANUAL_ASSET_DEFAULT_META,
+    AccountType,
+)
 from app.domain.account.model import Account
 from app.domain.account.repository import AccountRepository
 from app.domain.account.schema import (
@@ -238,13 +242,20 @@ async def create_account(
     repo = AccountRepository(db)
     sort_order = req.sort_order if req.sort_order is not None else (await repo.max_sort_order(household.id)) + 1
 
+    # 수동자산 통장은 color/icon 미지정 시 type별 기본값 부여 (프론트가 부담하지 않게).
+    color, icon = req.color, req.icon
+    if req.account_type in MANUAL_ASSET_DEFAULT_META:
+        default_color, default_icon = MANUAL_ASSET_DEFAULT_META[req.account_type]
+        color = color or default_color
+        icon = icon or default_icon
+
     account = Account(
         household_id=household.id,
         name=req.name.strip(),
         account_type=req.account_type,
         start_balance=req.start_balance,
-        color=req.color,
-        icon=req.icon,
+        color=color,
+        icon=icon,
         sort_order=sort_order,
         is_archived=False,
         data_stat_cd=DataStatus.ACTIVE,
