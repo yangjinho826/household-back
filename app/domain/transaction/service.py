@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
-from app.domain.account.enum import MANUAL_ASSET_ACCOUNT_TYPES, AccountType
+from app.domain.account.enum import MANUAL_ASSET_ACCOUNT_TYPES
 from app.domain.account.repository import AccountRepository
 from app.domain.category.enum import CategoryKind
 from app.domain.category.repository import CategoryRepository
@@ -33,10 +33,6 @@ from app.domain.transaction.schema import (
     TransactionUpdateRequest,
 )
 from app.domain.user.model import User
-
-# running balance 를 지원하는 거래계좌 — 현금흐름 잔액이 곧 balance.
-# INVESTMENT(평가액 섞임)·REAL_ESTATE/PENSION/COMMODITY(거래 없음)는 제외.
-_LEDGER_ACCOUNT_TYPES = (AccountType.LIVING, AccountType.SAVINGS, AccountType.OTHER)
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +232,7 @@ async def _ledger_start_balance(
         - sums["expense"]
         - sums["transfer_out"]
         + sums["transfer_in"]
+        + sums["valuation_net"]  # 수동자산 평가조정 누적 — 현금흐름 통장은 0.
     )
 
 
@@ -301,8 +298,8 @@ async def list_account_ledger(
     account = await AccountRepository(db).find_by_id(account_id)
     if account is None or account.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
-    if account.account_type not in _LEDGER_ACCOUNT_TYPES:
-        raise CustomException(ErrorCode.BAD_REQUEST)
+    # 모든 통장 타입 허용 — 현금흐름/수동자산은 running balance 정확, INVESTMENT 는
+    # 매매현금이 거래 밖이라 잔액은 부정확(프론트에서 잔액 표시를 숨긴다).
 
     tx_cursor, carry = _split_ledger_cursor(cursor)
     f, balance_to_date = _ledger_filter(account_id, year, month)
