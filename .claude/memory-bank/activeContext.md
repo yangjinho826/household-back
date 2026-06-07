@@ -1,10 +1,10 @@
 # 활성 컨텍스트
 
-> **두 학습 트랙 병행 중.** 현재 포커스 = **[트랙 A] 소스분석/노션**. [트랙 B] 유닛테스트/TDD는 아래 보존(Part 01·02 완료, Part 03 대기). branch: `docs/codebase-study` (소스분석 학습 전용, main에서 분기).
+> **이 브랜치(`docs/codebase-study`)는 소스분석 전용.** main에서 분기. 노션을 지도로 household-back 소스를 0→7 순서로 따라가며 구조·흐름 학습.
 
 ---
 
-# [트랙 A] 소스분석 학습 (2026-06-07 시작)
+# 소스분석 학습 (2026-06-07 시작)
 
 ## Goal
 
@@ -32,39 +32,6 @@
 
 ---
 
-# [트랙 B] 유닛테스트/TDD 학습 (기존, 보존)
-
-## Goal
-
-**유닛테스트 & TDD 학습 트랙** (2026-06-07 시작). 노션 "유닛테스트와 TDD" 정리(Spring 2강의)를 커리큘럼으로 재구성 → Part별 정리(learning_guide v3) → **household-back `tests/`에 실제 테스트로 적용**. 포폴=FastAPI, 실무=Spring을 개념 축으로 병행. SRE 로드맵 Phase 0의 tests/ 셋업과 직접 연결.
-
-## Status
-
-**커리큘럼 작성 완료. Part 01·02 작성 완료(카페키오스크 예시로 재작성), Part 03부터 대기.** → `docs/testing/00-curriculum.md` (5섹션 12 Part).
-
-- 각 Part = `개념(언어무관) → Spring 구현(노션) → FastAPI 매핑(household 적용)` 3단
-- 풀 보충 채택: 🆕테스트 피라미드(01)·pytest-asyncio(05)·Testcontainers(09)·FastAPI 스택 httpx+ASGITransport/dependency_overrides(10)·커버리지(12)
-- 노션 소스 4노트: 01.TDD소개 / 03.TDD주기 / Spring TDD / Practical Testing(박우빈). **JS 강의·Django·빈 체크리스트 제외**
-
-## Context
-
-- **학습 방식 = A모드(학습 우선)**: 개념/트레이드오프를 결정 근거로 남기며 진행. 목적 "이력서 어필 = 실무에서 무조건 할 수 있어야" → 면접 꼬리질문 방어가 기준. (decisions.md 2026-06-07 4건 참조)
-- **두 강의 스타일 차이**: 강의A(01·03)=통합테스트 우선(TestRestTemplate/RANDOM_PORT)+인터페이스 설계 이론 / 강의B(Practical)=단위→통합 피라미드+레이어별(@DataJpaTest/@WebMvcTest)+Mock 깊이+테스트 철학. → 하나로 통합 재구성.
-- **tests/ 현 상태 = 백지**: `tests/__pycache__/`만 유물. **소스 .py 없음, git 무이력**. pytest/pytest-asyncio/pytest-mock 의존성은 설치됨, `[tool.pytest.ini_options]`/asyncio_mode **미설정**.
-- **Part 작성 규칙 (사용자 피드백 2026-06-07, 확정)**:
-  1. 예시 = **카페 키오스크** 도메인. **입문자도 이해 가능하게** 클래스 정의·맥락 먼저.
-  2. **모음 실제 코드 완전 제외** — 도메인 지식이 학습 노이즈라 제외. 실제 테스트는 tests/ 짤 때 따로.
-  3. 3단 매핑: `개념 → Spring(카페키오스크) → FastAPI(같은 소재 pytest 변환)`.
-  4. `(실무)`/`(포폴)` 라벨 없이 **프레임워크명만**.
-  5. 제품 지칭은 브랜드명 **"모음"** (코드 경로 household-back은 그대로).
-
-## Next Step (트랙 B)
-
-1. **"Part 03 해줘"** → learning_guide v3 형식 Part 03(구조와 단언) 작성. `docs/testing/03-*.md` (이미 작성됨 — 확인 필요) → Part 06부터일 수 있음, 커리큘럼.md 진행표 확인.
-2. Part 진행 시 커리큘럼.md 진행상황 테이블 ⏳→✅ 갱신.
-
----
-
 ## 향후 큰 목표 — SRE 운영 트랙 (포트폴리오 차별화)
 
 이직용 포트폴리오 차별화 — `household-back` + `household-front` 가계부를 **"1인 SRE가 실제로 운영하는 부부 공유 가계부 SaaS"** 컨셉으로 확장.
@@ -78,4 +45,4 @@
 
 **로드맵 (7 Phase)**: 0.기반(tests+pre-commit+/health) → 1.Sentry → 2.Prom/Grafana/Loki → 3.OTel/Tempo/Uptime → 4.Alertmanager/SLO/Discord → 5.Capacitor → 6.RUNBOOK/인시던트/회고 → 7.README. 추천 순서 0→1→5→2→3→4→6→7. 상세: `~/.claude/plans/hashed-inventing-sprout.md`.
 
-> **현재 테스트 학습 트랙이 Phase 0(tests/ 셋업)을 학습과 함께 채우는 중** — 학습으로 짠 테스트가 곧 Phase 0 산출물. 소스분석 트랙(A)은 그 전제(코드 이해)를 다지는 역할.
+> **소스분석 트랙은 그 전제(코드 이해)를 다지는 역할.**
