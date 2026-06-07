@@ -1,51 +1,81 @@
 # 활성 컨텍스트
 
+> **두 학습 트랙 병행 중.** 현재 포커스 = **[트랙 A] 소스분석/노션**. [트랙 B] 유닛테스트/TDD는 아래 보존(Part 01·02 완료, Part 03 대기). branch: `docs/codebase-study` (소스분석 학습 전용, main에서 분기).
+
+---
+
+# [트랙 A] 소스분석 학습 (2026-06-07 시작)
+
 ## Goal
 
-**평가금 수정 UX를 거래 화면으로 이동 + 모바일 삭제버튼 수정 + 도커 DB 포트** (2026-06-04, 자산통합 후속).
+노션 "가계부 백엔드 API 레퍼런스"(개요 + 0~7 도메인 하위페이지)를 **지도**로 household-back 소스를 0→7 순서로 따라가며 전체 구조·흐름 학습. 바이브 코딩으로 짠 코드라 소스 분석이 덜 됐던 걸 메우는 게 목적.
 
 ## Status
 
-**3건 전부 완료. 미커밋 — 커밋 대기.** (`npm run build`/tsc/eslint 통과)
-
-- **#1 모바일 삭제버튼**: `form-sheet.tsx` Drawer가 BottomTab(z-index 500, 64px) 높이 보정 누락 → 삭제버튼이 탭바 밑에 깔려 클릭 차단. `household-switcher.tsx`의 보정 공식(`maxHeight: min(90dvh, 100dvh - bottom-tab-h - safe-bottom)` / `paddingBottom: bottom-tab-h + safe-bottom + 16`) 적용.
-- **#2 평가금→거래**: 거래 폼 맨 위 **통장 칩 리스트**(전체 계좌) + 선택 타입 분기. 수동자산→평가조정(새 평가액 절대값 입력, diff를 VALUATION 거래로 생성), 일반→기존 폼. `use-form.tsx`에 accounts param·txType 동기화 effect·VALUATION submit 분기 추가. **자산 폼(asset-form/use-asset-form)은 초기금(startBalance) 직접수정으로 복귀** — 자동 VALUATION 생성 제거. 백엔드 무변경(VALUATION 거래·form-options 전체계좌·account update startBalance 이미 완비).
-- **#3 도커 포트**: base compose 불변, git-ignore된 `docker-compose.override.yml`로 `127.0.0.1:5432` localhost 한정 노출. `.gitignore`에 override 추가.
-- **#2 후속 UX**: 거래 폼 통장 칩을 **가로 스크롤 한 줄**(통장 많을 때 대비).
-- **#2 후속2 — 거래 필터 전체 통장**: 거래 탭 계좌 필터에 **전체 통장 노출**(적금/수동자산/투자 다 보임, 이동 X 탭 안 필터). 백엔드 `list_account_ledger` **타입 가드 제거**(전 타입 허용) + `_ledger_start_balance`에 `sums["valuation_net"]` 추가 → 수동자산 평가조정 running balance 정확. `_LEDGER_ACCOUNT_TYPES` 상수 삭제(+AccountType import 정리). INVESTMENT은 매매현금이 거래 테이블 밖이라 잔액 부정확 → 프론트에서 `showBalance=false`로 **잔액 컬럼만 숨김**(거래는 표시). plumbing: transactions-section→AccountLedgerView→LedgerRow. LedgerRow에 VALUATION "평가조정" 보조라벨. **백엔드 변경 → 서버 재기동 필요.**
-
-이전 마일스톤(자산통합):
-**백엔드 자산통합 + 프론트(C) 전부 완료. 커밋됨(77bb340까지).**
-
-C(프론트) 완료 (2026-06-04):
-- 백엔드 단계1: `account/enum.py` `MANUAL_ASSET_DEFAULT_META` + `create_account` 기본 color/icon 부여 (QA verified: REAL_ESTATE → #8B5CF6/building-estate)
-- transaction 프론트 VALUATION 지원: `TxType`+`ValuationDirection`+`valuationDirection`, 거래폼 직접선택 제외, tx-row/ledger-row 방향별 부호·색
-- account feature 통합: `asset-form.tsx`+`use-asset-form.tsx` 신규 (추가=account생성 / 평가액수정=차액 VALUATION / 이름·타입=update / 삭제)
-- manual-asset feature 7파일 삭제 + queries.ts 정리. wealth-section `accounts.filter(isManualAsset)`로 전환
-- 날짜 mantine v8 string화: transaction/trade/household form
-- i18n: account.asset.*, COMMODITY·VALUATION 라벨, manual-asset 제거
-- 검증: 백 pytest 4 green · 프론트 typecheck/lint 통과 · curl 골든패스(생성·증액·감액·지출차단·삭제) 전부 통과
-
-이전 Status (백엔드 단계):
-**백엔드 자산통합(1~6) 완료 + 커밋(`38737b0`, 테스트 제외).**
-
-커밋됨:
-- 프론트 버그3 (main): `8bbb370` 누적매매수익 날짜(mantine v8 string화), `7173a6e` 거래 후 계좌 캐시(transaction mutation에 portfolio invalidate 누락 추가), `140397f` 도넛 외/현금 pinToEnd 맨뒤 정렬
-- 백엔드 (main): `38737b0` VALUATION 거래타입+valuation_direction 컬럼, 잔액 공식 통일, manual_asset 도메인 제거, 평가액→start_balance 흡수 마이그(e5f9a1c3d7b2, f1b3d5a7c9e2)
-
-검증: dev DB(postgres-dev) `alembic upgrade head` 적용 완료(head=f1b3d5a7c9e2). pytest 4 green(단, `tests/`+`pyproject.toml` pytest설정은 미커밋 — 테스트 제외 지시).
+**노션 재정리 완료.** 코드 직접 분석(7개 에이전트 병렬 도메인 분석 + 공통 인프라는 직접 Read) 기반:
+- 기존 노션 페이지(79 엔드포인트 표) → **개요/인덱스로 재작성** (아키텍처 mermaid / 공통규약 / 추천 읽기순서 0~7 / 도메인 인덱스 / 전역 설계관찰)
+- **0~7 도메인 하위페이지 8개 생성** — 각 엔드포인트 `router→service→repository` 흐름 + 모델 + "읽을 파일 순서" + "다른 도메인 의존"
+- 코드 워크스루(코드인용+WHY+❌✅)는 **채팅으로** 진행하기로 합의(노션과 중복이라 노션엔 미반영). 채팅 묶음 1(BaseEntity / soft delete / ApiResponse / CamelBaseModel)까지 완료.
 
 ## Context
 
-- **C(프론트) 핵심 복잡성**: account create가 수동자산 type 생성 시 color/icon/이름 기본부여를 떠안아야 함. 기존 `manual_asset._ROLLUP_ACCOUNT_META` 값: REAL_ESTATE=`#8B5CF6`/`building-estate`, PENSION=`#EC4899`/`pig-money`, COMMODITY=`#F59E0B`/`coin`, SAVINGS_ASSET=`#10B981`/`wallet`. → 백엔드 account 도메인 보강 필요.
-- 프론트 `_features/manual-asset/` (api/queries/components/form/hooks/types) + 사용처(wealth-section, transaction/form, account/types, _constants/queries, ko·en messages) 13+파일 → account 생성 + 평가조정 거래로 재구성.
-- **평가액 수정 UX**: "현재 총 평가액" 절대값 입력 → (새값 − 현재잔액) 차액을 VALUATION 거래로 자동 생성. 이체는 기존 그대로 별도.
-- VALUATION API: `POST /transactions` `{tx_type:"VALUATION", amount(양수), valuationDirection:"INCREASE"|"DECREASE", accountId(수동자산 통장)}`. 수동자산 통장에만 허용.
-- trade-form/transaction form/household form 날짜도 mantine v8 버그(`value={dayjs(x).toDate()}` Date 전달) — C에서 같이 string 규격화.
-- 잔액 공식(백엔드): 전 분류 `start_balance + 거래합`. `_cash_flow`에 `valuation_net` 포함. `_calc_balance`/`_build_balance` 동일성 유지(test_account_balance.py).
+- **노션 개요**: https://app.notion.com/p/374a6161032981029d29d7288152fd29 (본문 읽기순서 표에서 0~7 하위로 점프 + 하단 자동 링크). URL 전체는 notes.md.
+- **레이어**: router → service → repository → model, schema=DTO. **공통**: ApiResponse+camelCase(CamelBaseModel), 인증 CurrentUser / 스코프 CurrentHousehold(X-Household-Id), soft delete `data_stat_cd` 50/99, BaseEntity(UUID PK+감사필드), CursorPage(커서 `{정렬키}|{id}`, limit+1), 멱등성(POST+Idempotency-Key), 금액 Money/Quantity, 스케줄러 5잡+advisory lock. **모든 가격 KRW 박제**(USD는 조회/갱신 시 환율 곱함). **ORM relationship 안 씀**(find_by_ids batch).
+- **발견한 잠재 버그 2개** → notes.md. 기록만, 수정은 별도 결정.
+- 노션은 git 밖(외부)이라 이 트랙의 git 산출물 = 메모리뱅크 기록뿐.
 
 ## Next Step
 
-1. **커밋** — 백엔드(account 기본 메타) + 프론트(자산통합 C) 분리 커밋. 백엔드 `tests/`+`pyproject` pytest설정 커밋 여부 결정.
-2. dev→main 머지 검토 (R5a 사이클 + 자산통합 전부 완료).
-3. (선택) 브라우저 E2E — 자산 추가/평가액 수정 폼 실제 렌더 (Windows headless 빌드 필요 시).
+1. 노션 0→7 순서로 소스 따라가기. 다음 = **묶음 2 (인증: jwt.py → deps.py CurrentUser → household/deps.py CurrentHousehold)**. 이후 묶음 3(에러+커서), 묶음 4(멱등성+스케줄러+부팅).
+2. 막히는 함수/로직은 채팅으로 ("X가 왜 이렇게 짰어?") → 코드 열어 같이 분석.
+3. (선택) 잠재 버그 2개 수정 여부 결정 (decision-helper or 바로 fix).
+
+---
+
+# [트랙 B] 유닛테스트/TDD 학습 (기존, 보존)
+
+## Goal
+
+**유닛테스트 & TDD 학습 트랙** (2026-06-07 시작). 노션 "유닛테스트와 TDD" 정리(Spring 2강의)를 커리큘럼으로 재구성 → Part별 정리(learning_guide v3) → **household-back `tests/`에 실제 테스트로 적용**. 포폴=FastAPI, 실무=Spring을 개념 축으로 병행. SRE 로드맵 Phase 0의 tests/ 셋업과 직접 연결.
+
+## Status
+
+**커리큘럼 작성 완료. Part 01·02 작성 완료(카페키오스크 예시로 재작성), Part 03부터 대기.** → `docs/testing/00-curriculum.md` (5섹션 12 Part).
+
+- 각 Part = `개념(언어무관) → Spring 구현(노션) → FastAPI 매핑(household 적용)` 3단
+- 풀 보충 채택: 🆕테스트 피라미드(01)·pytest-asyncio(05)·Testcontainers(09)·FastAPI 스택 httpx+ASGITransport/dependency_overrides(10)·커버리지(12)
+- 노션 소스 4노트: 01.TDD소개 / 03.TDD주기 / Spring TDD / Practical Testing(박우빈). **JS 강의·Django·빈 체크리스트 제외**
+
+## Context
+
+- **학습 방식 = A모드(학습 우선)**: 개념/트레이드오프를 결정 근거로 남기며 진행. 목적 "이력서 어필 = 실무에서 무조건 할 수 있어야" → 면접 꼬리질문 방어가 기준. (decisions.md 2026-06-07 4건 참조)
+- **두 강의 스타일 차이**: 강의A(01·03)=통합테스트 우선(TestRestTemplate/RANDOM_PORT)+인터페이스 설계 이론 / 강의B(Practical)=단위→통합 피라미드+레이어별(@DataJpaTest/@WebMvcTest)+Mock 깊이+테스트 철학. → 하나로 통합 재구성.
+- **tests/ 현 상태 = 백지**: `tests/__pycache__/`만 유물. **소스 .py 없음, git 무이력**. pytest/pytest-asyncio/pytest-mock 의존성은 설치됨, `[tool.pytest.ini_options]`/asyncio_mode **미설정**.
+- **Part 작성 규칙 (사용자 피드백 2026-06-07, 확정)**:
+  1. 예시 = **카페 키오스크** 도메인. **입문자도 이해 가능하게** 클래스 정의·맥락 먼저.
+  2. **모음 실제 코드 완전 제외** — 도메인 지식이 학습 노이즈라 제외. 실제 테스트는 tests/ 짤 때 따로.
+  3. 3단 매핑: `개념 → Spring(카페키오스크) → FastAPI(같은 소재 pytest 변환)`.
+  4. `(실무)`/`(포폴)` 라벨 없이 **프레임워크명만**.
+  5. 제품 지칭은 브랜드명 **"모음"** (코드 경로 household-back은 그대로).
+
+## Next Step (트랙 B)
+
+1. **"Part 03 해줘"** → learning_guide v3 형식 Part 03(구조와 단언) 작성. `docs/testing/03-*.md` (이미 작성됨 — 확인 필요) → Part 06부터일 수 있음, 커리큘럼.md 진행표 확인.
+2. Part 진행 시 커리큘럼.md 진행상황 테이블 ⏳→✅ 갱신.
+
+---
+
+## 향후 큰 목표 — SRE 운영 트랙 (포트폴리오 차별화)
+
+이직용 포트폴리오 차별화 — `household-back` + `household-front` 가계부를 **"1인 SRE가 실제로 운영하는 부부 공유 가계부 SaaS"** 컨셉으로 확장.
+
+핵심 한 줄: SLO 정의 → 메트릭/로그/트레이싱/알람 풀스택 관측성 → 인위 장애 시나리오로 인시던트 대응 → RUNBOOK·회고 작성. iOS/Android 스토어 배포 포함.
+
+**3가지 핵심 결정 (확정)**
+1. 모니터링: 하이브리드 — Sentry + Prometheus/Grafana + Loki + Tempo + Uptime Kuma + OpenTelemetry
+2. 어플 배포: Capacitor wrap (PWA → App Store / Play)
+3. 운영 깊이: Level 3 (RUNBOOK + 인위 인시던트 2건 + 회고)
+
+**로드맵 (7 Phase)**: 0.기반(tests+pre-commit+/health) → 1.Sentry → 2.Prom/Grafana/Loki → 3.OTel/Tempo/Uptime → 4.Alertmanager/SLO/Discord → 5.Capacitor → 6.RUNBOOK/인시던트/회고 → 7.README. 추천 순서 0→1→5→2→3→4→6→7. 상세: `~/.claude/plans/hashed-inventing-sprout.md`.
+
+> **현재 테스트 학습 트랙이 Phase 0(tests/ 셋업)을 학습과 함께 채우는 중** — 학습으로 짠 테스트가 곧 Phase 0 산출물. 소스분석 트랙(A)은 그 전제(코드 이해)를 다지는 역할.
