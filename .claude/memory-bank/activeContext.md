@@ -15,7 +15,9 @@
 **노션 재정리 완료.** 코드 직접 분석(7개 에이전트 병렬 도메인 분석 + 공통 인프라는 직접 Read) 기반:
 - 기존 노션 페이지(79 엔드포인트 표) → **개요/인덱스로 재작성** (아키텍처 mermaid / 공통규약 / 추천 읽기순서 0~7 / 도메인 인덱스 / 전역 설계관찰)
 - **0~7 도메인 하위페이지 8개 생성** — 각 엔드포인트 `router→service→repository` 흐름 + 모델 + "읽을 파일 순서" + "다른 도메인 의존"
-- 코드 워크스루(코드인용+WHY+❌✅)는 **채팅으로** 진행하기로 합의(노션과 중복이라 노션엔 미반영). 채팅 묶음 1(BaseEntity / soft delete / ApiResponse / CamelBaseModel)까지 완료.
+- 코드 워크스루(코드인용+WHY+❌✅)는 **채팅으로** 진행하기로 합의(노션과 중복이라 노션엔 미반영).
+- **워크스루 0부터 다시 시작하기로 결정 (이전 진행분 리셋).** 워크스루 번호 = 노션 도메인 번호(0~7)에 맞춤. → 0.공통인프라(core) / 1.auth·user / 2.household / 3.account·category / 4.transaction / 5.fixed·snapshot / 6.portfolio·market·exchange / 7.stats·home·wealth·settings·enum·health. (예전 "묶음1=BaseEntity~" 체계는 폐기)
+- **아직 워크스루 미시작** — 다음 세션에 0번부터.
 
 ## Context
 
@@ -26,7 +28,7 @@
 
 ## Next Step
 
-1. 노션 0→7 순서로 소스 따라가기. 다음 = **묶음 2 (인증: jwt.py → deps.py CurrentUser → household/deps.py CurrentHousehold)**. 이후 묶음 3(에러+커서), 묶음 4(멱등성+스케줄러+부팅).
+1. **워크스루 0번(공통 인프라/core)부터 시작** — 노션 0번 페이지를 지도로 core 코드(BaseEntity / soft delete / ApiResponse / CamelBaseModel / 커서 / 멱등성 등) 따라가기. 이후 1→7 순서.
 2. 막히는 함수/로직은 채팅으로 ("X가 왜 이렇게 짰어?") → 코드 열어 같이 분석.
 3. (선택) 잠재 버그 2개 수정 여부 결정 (decision-helper or 바로 fix).
 
