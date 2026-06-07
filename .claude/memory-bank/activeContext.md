@@ -1,6 +1,8 @@
 # 활성 컨텍스트
 
-> **이 브랜치(`docs/codebase-study`)는 소스분석 전용.** main에서 분기. 노션을 지도로 household-back 소스를 0→7 순서로 따라가며 구조·흐름 학습.
+> **이 브랜치(`docs/codebase-study`)는 소스분석 전용.** main에서 직접 분기(2026-06-07 git 구조 재정리 완료). 노션을 지도로 household-back 소스를 0→7 순서로 따라가며 구조·흐름 학습.
+>
+> **브랜치 구조**: `main` ─┬─ `docs/codebase-study`(소스분석 4커밋) └─ `docs/portfolio-sre-roadmap`(SRE+유닛테스트 4커밋). 둘 다 origin 동기화됨.
 
 ---
 
@@ -18,6 +20,7 @@
 - 코드 워크스루(코드인용+WHY+❌✅)는 **채팅으로** 진행하기로 합의(노션과 중복이라 노션엔 미반영).
 - **워크스루 0부터 다시 시작하기로 결정 (이전 진행분 리셋).** 워크스루 번호 = 노션 도메인 번호(0~7)에 맞춤. → 0.공통인프라(core) / 1.auth·user / 2.household / 3.account·category / 4.transaction / 5.fixed·snapshot / 6.portfolio·market·exchange / 7.stats·home·wealth·settings·enum·health. (예전 "묶음1=BaseEntity~" 체계는 폐기)
 - **아직 워크스루 미시작** — 다음 세션에 0번부터.
+- **(2026-06-07) git 히스토리 재정리 완료** — `docs/codebase-study`가 유닛테스트/SRE 커밋 위에 얹혀 있던 걸 `rebase --onto main`으로 main 바로 위(소스분석 4커밋만)로 분리. 유닛테스트/SRE는 `docs/portfolio-sre-roadmap`에 남김. 내용 손실 0(원본 트리와 diff 비어있음 확인), force push 완료. 원본 안전망 = 로컬 `backup/codebase-study-pre-rebase-5253922`.
 
 ## Context
 
