@@ -26,9 +26,31 @@
 - **발견한 잠재 버그 2개** → notes.md. 기록만, 수정은 별도 결정.
 - 노션은 git 밖(외부)이라 이 트랙의 git 산출물 = 메모리뱅크 기록뿐.
 
+## 소스 전체 흐름 (한 장 요약 — 내일 따라갈 지도)
+
+> "이 플젝이 전체적으로 어떤 흐름이냐" 에 대한 답. 내일 0번부터 코드로 검증.
+
+**스택**: FastAPI + SQLAlchemy 2.x(async) + PostgreSQL + APScheduler. `app/main.py`가 `root_path="/api"` (모든 경로 `/api` 하위). 도메인형 레이어드 — 도메인마다 `router/service/repository/model/schema(+enum)` 동일 5~6파일.
+
+**요청 1건이 거치는 길** (front → DB → front):
+
+| 단계 | 무슨 일 | 파일 |
+|---|---|---|
+| 1. 미들웨어 | POST+`Idempotency-Key`면 멱등 처리. 모든 요청 access log 1줄 | `core/idempotency/middleware.py`, `core/middleware/access_log.py` |
+| 2. 라우터+의존성 | `Depends`로 `CurrentUser`(JWT) / `CurrentHousehold`(X-Household-Id+멤버십) / `get_db` 주입 | `core/auth/deps.py`, `domain/household/deps.py`, `core/database.py` |
+| 3. 서비스 | 검증→비즈니스 로직. **여기가 트랜잭션 경계**(get_db 정상종료 commit, 예외 rollback) | `domain/*/service.py` |
+| 4. 리포지토리 | `select()` 쿼리만. 조인 대신 `find_by_ids` batch(N+1 회피) | `domain/*/repository.py` |
+| 5. 응답 | 도메인→`*Response`→`ApiResponse.ok()`. snake→camel 자동 | `core/api_response.py`, `core/schema.py` |
+| 예외 | `CustomException(ErrorCode)`→핸들러가 전부 ApiResponse JSON(한국어) | `core/exceptions/handlers.py` |
+
+**읽기 순서 0→7** (의존성 위→아래, 위가 아래 전제):
+`0.core`(전제) → `1.auth·user`(인증 출발) → `2.household`(스코프·멤버) → `3.account·category`(거래 재료) → `4.transaction`(★핵심, 5타입+달력+원장) → `5.fixed·snapshot`(고정지출+자산박제) → `6.portfolio·market·exchange`(★최난도, 평단·시세·환율) → `7.stats·home·wealth·settings·enum·health`(집계/합성).
+
+**전역 6패턴** (이거 알면 전 도메인이 같은 방식으로 읽힘): notes.md "학습 노트" 참조 — ①relationship 안 씀(find_by_ids batch) ②soft delete 기본('99')+수동 cascade ③household 스코프 강제(위반=NOT_FOUND 은닉) ④가격 KRW 박제 ⑤커서 페이징 통일 ⑥overview 3종은 합성만.
+
 ## Next Step
 
-1. **워크스루 0번(공통 인프라/core)부터 시작** — 노션 0번 페이지를 지도로 core 코드(BaseEntity / soft delete / ApiResponse / CamelBaseModel / 커서 / 멱등성 등) 따라가기. 이후 1→7 순서.
+1. **워크스루 0번(공통 인프라/core)부터 시작** — 노션 0번 페이지를 지도로 core 코드 따라가기. 0번 페이지의 "읽을 파일 순서" 9단계: ①`core/model.py`+`enums/data_status.py`(BaseEntity·soft delete) ②`core/schema.py`+`api_response.py`(응답봉투) ③`core/auth/jwt.py`→`deps.py`→`extract.py`(인증) ④`domain/household/deps.py`(스코프) ⑤`core/exceptions/error_code.py`→`handlers.py`(에러) ⑥`core/pagination.py`(커서) ⑦`core/idempotency/middleware.py`+`service.py`(멱등성) ⑧`core/scheduler.py`+`jobs.py`(스케줄러) ⑨`core/database.py`+`config.py`+`main.py`(부팅). 이후 1→7.
 2. 막히는 함수/로직은 채팅으로 ("X가 왜 이렇게 짰어?") → 코드 열어 같이 분석.
 3. (선택) 잠재 버그 2개 수정 여부 결정 (decision-helper or 바로 fix).
 
