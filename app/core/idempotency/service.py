@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AcquireResult:
+    # acquired=True  → 락 획득(새 요청). 미들웨어가 라우터를 실행
+    # acquired=False → 캐시 hit. cached_record 의 응답을 그대로 반환(라우터 실행 X)
+    # 거부/대기(ID001~ID003)는 이 객체가 아니라 CustomException 으로 전달돼,
+    # process_acquire 가 정상 반환하는 경로는 위 두 가지뿐이다.
     acquired: bool
     cached_record: IdempotencyRecord | None = field(default=None)
 

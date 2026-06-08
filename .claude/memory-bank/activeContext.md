@@ -19,7 +19,7 @@
 - **0~7 도메인 하위페이지 8개 생성** — 각 엔드포인트 `router→service→repository` 흐름 + 모델 + "읽을 파일 순서" + "다른 도메인 의존"
 - 코드 워크스루(코드인용+WHY+❌✅)는 **채팅으로** 진행하기로 합의(노션과 중복이라 노션엔 미반영).
 - **워크스루 0부터 다시 시작하기로 결정 (이전 진행분 리셋).** 워크스루 번호 = 노션 도메인 번호(0~7)에 맞춤. → 0.공통인프라(core) / 1.auth·user / 2.household / 3.account·category / 4.transaction / 5.fixed·snapshot / 6.portfolio·market·exchange / 7.stats·home·wealth·settings·enum·health. (예전 "묶음1=BaseEntity~" 체계는 폐기)
-- **아직 워크스루 미시작** — 다음 세션에 0번부터.
+- **워크스루 0번(core) 완주 (2026-06-08)** — 9단계 채팅 워크스루 끝. ①BaseEntity·soft delete ②응답봉투 ③인증 ④스코프 ⑤에러 ⑥페이징 ⑦멱등성 ⑧스케줄러 ⑨부팅. 멱등성을 가장 깊게 팜(process_acquire 상태머신 / INSERT ON CONFLICT DO NOTHING atomic 락 / body sha256 fingerprint / AcquireResult True·False 의미). `idempotency/service.py` AcquireResult 필드에 주석 추가. **다음 세션은 워크스루 1번(auth·user)부터.**
 - **(2026-06-07) git 히스토리 재정리 완료** — `docs/codebase-study`가 유닛테스트/SRE 커밋 위에 얹혀 있던 걸 `rebase --onto main`으로 main 바로 위(소스분석 4커밋만)로 분리. 유닛테스트/SRE는 `docs/portfolio-sre-roadmap`에 남김. 내용 손실 0(원본 트리와 diff 비어있음 확인), force push 완료. 원본 안전망 = 로컬 `backup/codebase-study-pre-rebase-5253922`.
 
 ## Context
@@ -53,23 +53,7 @@
 
 ## Next Step
 
-1. **워크스루 0번(공통 인프라/core)부터 시작** — 노션 0번 페이지를 지도로 core 코드 따라가기. 0번 페이지의 "읽을 파일 순서" 9단계: ①`core/model.py`+`enums/data_status.py`(BaseEntity·soft delete) ②`core/schema.py`+`api_response.py`(응답봉투) ③`core/auth/jwt.py`→`deps.py`→`extract.py`(인증) ④`domain/household/deps.py`(스코프) ⑤`core/exceptions/error_code.py`→`handlers.py`(에러) ⑥`core/pagination.py`(커서) ⑦`core/idempotency/middleware.py`+`service.py`(멱등성) ⑧`core/scheduler.py`+`jobs.py`(스케줄러) ⑨`core/database.py`+`config.py`+`main.py`(부팅). 이후 1→7.
+1. **워크스루 1번(auth·user)부터 시작** — 노션 1번 페이지를 지도로. user(회원가입/조회/수정/이메일검색) + auth(로그인/refresh/logout, refresh token 회전 최대 5개) 흐름 router→service→repository 따라가기. 0번에서 본 인증(jwt/deps)·에러·봉투가 실제 도메인에서 어떻게 쓰이는지 검증.
 2. 막히는 함수/로직은 채팅으로 ("X가 왜 이렇게 짰어?") → 코드 열어 같이 분석.
-3. (선택) 잠재 버그 2개 수정 여부 결정 (decision-helper or 바로 fix).
-
----
-
-## 향후 큰 목표 — SRE 운영 트랙 (포트폴리오 차별화)
-
-이직용 포트폴리오 차별화 — `household-back` + `household-front` 가계부를 **"1인 SRE가 실제로 운영하는 부부 공유 가계부 SaaS"** 컨셉으로 확장.
-
-핵심 한 줄: SLO 정의 → 메트릭/로그/트레이싱/알람 풀스택 관측성 → 인위 장애 시나리오로 인시던트 대응 → RUNBOOK·회고 작성. iOS/Android 스토어 배포 포함.
-
-**3가지 핵심 결정 (확정)**
-1. 모니터링: 하이브리드 — Sentry + Prometheus/Grafana + Loki + Tempo + Uptime Kuma + OpenTelemetry
-2. 어플 배포: Capacitor wrap (PWA → App Store / Play)
-3. 운영 깊이: Level 3 (RUNBOOK + 인위 인시던트 2건 + 회고)
-
-**로드맵 (7 Phase)**: 0.기반(tests+pre-commit+/health) → 1.Sentry → 2.Prom/Grafana/Loki → 3.OTel/Tempo/Uptime → 4.Alertmanager/SLO/Discord → 5.Capacitor → 6.RUNBOOK/인시던트/회고 → 7.README. 추천 순서 0→1→5→2→3→4→6→7. 상세: `~/.claude/plans/hashed-inventing-sprout.md`.
-
-> **소스분석 트랙은 그 전제(코드 이해)를 다지는 역할.**
+3. (보류) 0번서 관찰한 잠재 개선점 2개 — `data_stat_cd` default 없음(생성 시 매번 수동 ACTIVE) / `core/model.py`의 naive `datetime.now`(컬럼은 tz-aware). notes.md 미기록, 수정도 미정.
+4. (선택) 기존 잠재 버그 2개 수정 여부 결정 (decision-helper or 바로 fix).
