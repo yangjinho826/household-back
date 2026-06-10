@@ -10,9 +10,10 @@
 - [x] 2026-06-07: 노션 API 레퍼런스 재정리 — 코드 직접 분석(7 에이전트 병렬+공통인프라 직접)으로 개요/인덱스 재작성 + 0~7 도메인 하위페이지 8개 생성 (소스분석 학습 트랙 시작, branch `docs/codebase-study`)
 - [x] 2026-06-08: 워크스루 0번(공통 인프라 core) 완주 — 9단계 채팅 워크스루(BaseEntity·soft delete / 응답봉투 / 인증 / 스코프 / 에러 / 페이징 / 멱등성 / 스케줄러 / 부팅). 멱등성 집중 심화(process_acquire 상태머신·ON CONFLICT atomic 락·fingerprint·AcquireResult). `idempotency/service.py` AcquireResult 필드 주석 추가.
 - [x] 2026-06-09: 워크스루 1번(auth·user) 완주 — user 5엔드포인트 + auth(login/refresh/logout). 토큰 2종 비대칭(access stateless / refresh stateful+회전5개) / refresh 검증 3단 / CurrentUser 2단 의존성. 곁다리로 관찰점 ①(CustomException이 Exception 상속이라 Pydantic validator 통과→구체 에러코드 보존) 추적. 관찰점 2개(dead 분기/naive datetime) notes.md 기록.
+- [x] 2026-06-10: 워크스루 2번(household) 완주 — CRUD+권한 도메인이라 핵심만 압축. owner_id 진실원(members.role은 표시용) / cascade soft-delete(수동 bulk UPDATE 8자식, AccountSnapshot만 subquery) / CurrentHousehold=JWT+X-Household-Id 헤더 멤버십 합성 의존성(household 라우터 자신은 path param). 헤더 vs path param 구분(현재 컨텍스트 vs 특정 리소스). 난이도 실측 → 알맹이는 3·4·6에 몰림 확인, 이후 알맹이 직격 모드 전환. 관찰점 1개(JOIN) notes.md.
 
 ## 진행 중
-- [ ] 소스분석 학습 트랙 — 노션 0→7 순서로 household-back 소스 따라가기 (다음: 워크스루 2번 household). 채팅 워크스루.
+- [ ] 소스분석 학습 트랙 — 모드 전환: 9단계 정독 → **3·4·6 알맹이 직격**(account 잔액계산 / transaction 원장 / portfolio 평단 재계산). 순서 account→transaction→portfolio. 채팅 워크스루.
 
 ## 막힘
 - [x] 2026-06-04: 평가금 수정 거래화면 이동(통장 칩+타입분기) + 모바일 삭제버튼 z-index 수정 + 도커 DB 포트 override
