@@ -64,66 +64,6 @@ logger = logging.getLogger(__name__)
 # USD 시장 — lookup 시 환율 적용해 KRW 환산 (market_price/service.py 와 동일 사상)
 _USD_MARKETS = frozenset({Market.NASDAQ, Market.NYSE})
 
-
-def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse:
-    account = account_map.get(item.account_id)
-    cost = item.quantity * item.avg_price
-    valuation = item.quantity * item.current_price
-    profit_loss = valuation - cost
-    profit_loss_rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0.00")
-
-    return PortfolioResponse(
-        id=item.id,
-        account_id=item.account_id,
-        account_name=account.name if account else "(삭제됨)",
-        name=item.name,
-        code=item.code,
-        market=Market(item.market),
-        quantity=item.quantity,
-        avg_price=item.avg_price,
-        current_price=item.current_price,
-        cost=cost,
-        valuation=valuation,
-        profit_loss=profit_loss,
-        profit_loss_rate=profit_loss_rate,
-        is_archived=item.is_archived,
-    )
-
-
-def _build_tx_response(tx: PortfolioTransaction, account_map: dict) -> PortfolioTxResponse:
-    account = account_map.get(tx.account_id)
-    return PortfolioTxResponse(
-        id=tx.id,
-        account_id=tx.account_id,
-        account_name=account.name if account else "(삭제됨)",
-        name=tx.name,
-        code=tx.code,
-        market=Market(tx.market),
-        pt_type=tx.pt_type,
-        quantity=tx.quantity,
-        price=tx.price,
-        total=tx.quantity * tx.price,
-        tx_date=tx.tx_date,
-        memo=tx.memo,
-        realized_pnl=tx.realized_pnl,
-    )
-
-
-async def _validate_investment_account(
-    db: AsyncSession, household_id: UUID, account_id: UUID,
-):
-    """INVESTMENT 통장이고 같은 가계부 소속인지 검증"""
-    accounts = await AccountRepository(db).find_by_ids([account_id])
-    if not accounts:
-        raise CustomException(ErrorCode.NOT_FOUND)
-    a = accounts[0]
-    if a.household_id != household_id or a.data_stat_cd != DataStatus.ACTIVE:
-        raise CustomException(ErrorCode.NOT_FOUND)
-    if a.account_type != AccountType.INVESTMENT:
-        raise CustomException(ErrorCode.BAD_REQUEST)
-    return a
-
-
 async def lookup_stock(
     db: AsyncSession, market: Market, code: str,
 ) -> PortfolioLookupResponse:
@@ -320,62 +260,6 @@ async def sell(
     return _build_response(item, {a.id: a for a in accounts})
 
 
-def _recompute_realized_pnl(
-    txs: list[PortfolioTransaction],
-) -> tuple[Decimal, Decimal]:
-    """거래를 시간순 replay 하며 각 SELL 의 실현손익을 그 시점 평단으로 재박제.
-
-    거래 수정/삭제로 평단이 바뀌면 과거 SELL 의 박제값이 틀어지므로,
-    매도시점 누적 이동평균(running_avg)으로 다시 계산해 SELL row 를 갱신한다.
-    txs 의 price 는 이미 KRW 박제값이라 환율 변환 불필요.
-
-    반환: replay 종료 시점의 (남은 수량, 남은 원가) — 호출부의 평단 재계산용.
-    """
-    running_qty = Decimal("0")
-    running_cost = Decimal("0")
-    for t in txs:
-        if t.pt_type == PortfolioTxType.BUY:
-            running_qty += t.quantity
-            running_cost += t.quantity * t.price
-        elif t.pt_type == PortfolioTxType.SELL:
-            running_avg = running_cost / running_qty if running_qty > 0 else Decimal("0")
-            t.realized_cost_basis = (running_avg * t.quantity).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP,
-            )
-            t.realized_pnl = (
-                (t.price - running_avg) * t.quantity
-            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            # 매도는 평단 불변 — 수량/원가를 평단 비율로 차감 (running_avg 유지)
-            running_cost -= running_avg * t.quantity
-            running_qty -= t.quantity
-    return running_qty, running_cost
-
-
-async def _recalc_item_from_transactions(
-    db: AsyncSession, item: PortfolioItem,
-) -> None:
-    """종목의 활성 거래 시간순 replay → quantity / avg_price 재계산.
-
-    이동평균: 매도 시점 평단으로 원가를 차감하므로 매도 후 재매수도 정확히
-    반영된다(단순 전체매수합/전체매수량은 평단을 왜곡). 매도 실현손익 재박제와
-    같은 replay 를 공유한다. 매도가 매수보다 많으면 BAD_REQUEST.
-    """
-    pt_repo = PortfolioTransactionRepository(db)
-    txs = await pt_repo.find_active_by_item_id(item.id)
-
-    remaining_qty, remaining_cost = _recompute_realized_pnl(txs)
-    if remaining_qty < 0:
-        raise CustomException(ErrorCode.BAD_REQUEST)
-
-    item.quantity = remaining_qty
-    item.avg_price = (
-        remaining_cost / remaining_qty if remaining_qty > 0 else Decimal("0.00")
-    )
-    # 거래 수정/삭제로 수량이 0→양수면 종목 부활, 양수→0이면 소멸(전량매도와 동일).
-    item.data_stat_cd = DataStatus.ACTIVE if remaining_qty > 0 else DataStatus.DELETED
-    await db.flush()
-
-
 async def update_portfolio_transaction(
     db: AsyncSession, household: Household, tx_id: UUID, req: PortfolioTxUpdateRequest,
 ) -> PortfolioTxResponse:
@@ -478,53 +362,6 @@ async def get_portfolio_detail(
         raise CustomException(ErrorCode.NOT_FOUND)
     accounts = await AccountRepository(db).find_by_ids([item.account_id])
     return _build_response(item, {a.id: a for a in accounts})
-
-
-def _default_month_range(
-    from_date: date | None, to_date: date | None,
-) -> tuple[date, date]:
-    """월별 스냅샷 추이 전용 — from/to 를 그달 1일로 정규화. 미지정 시 최근 12개월.
-
-    account-snapshot/yearly 와 동일 컨벤션. 일 단위 필터(매매손익)는 월 정규화하면
-    안 되므로 _default_day_range 를 쓴다.
-    """
-    today = today_kst().replace(day=1)
-    if not to_date:
-        to_date = today
-    else:
-        to_date = to_date.replace(day=1)
-    if not from_date:
-        total = to_date.year * 12 + (to_date.month - 1) - 11
-        y, m = divmod(total, 12)
-        from_date = date(y, m + 1, 1)
-    else:
-        from_date = from_date.replace(day=1)
-    return from_date, to_date
-
-
-def _default_day_range(
-    from_date: date | None, to_date: date | None,
-) -> tuple[date, date]:
-    """매매손익 전용 — 일 단위 자유 필터. 월 정규화 없음. 미지정 시 최근 12개월."""
-    if not to_date:
-        to_date = today_kst()
-    if not from_date:
-        try:
-            from_date = to_date.replace(year=to_date.year - 1)
-        except ValueError:  # 2/29 → 전년 2/28
-            from_date = to_date.replace(year=to_date.year - 1, day=28)
-    return from_date, to_date
-
-
-def _to_history_point(row: PortfolioValueHistory) -> PortfolioValueHistoryPoint:
-    return PortfolioValueHistoryPoint(
-        snapshot_date=row.snapshot_date,
-        quantity=row.quantity,
-        avg_price=row.avg_price,
-        current_price=row.current_price,
-        cost=row.cost,
-        valuation=row.valuation,
-    )
 
 
 async def get_realized_pnl_by_item(
@@ -705,59 +542,6 @@ async def get_value_history_by_item(
     )
 
 
-# =========================================================
-# Page-level overview / form-options (페이지 진입 시 1호출)
-# =========================================================
-
-
-def _zero_summary() -> PortfolioOverviewSummary:
-    z = Decimal("0")
-    return PortfolioOverviewSummary(
-        total_balance=z, total_cash=z, total_valuation=z,
-        total_cost=z, total_profit=z, total_rate=z,
-    )
-
-
-def _summarize_investment_accounts(
-    accounts: list[AccountResponse],
-) -> PortfolioOverviewSummary:
-    """INVESTMENT 계좌들의 총합 — balance/cash/valuation/cost/profit + 손익률. 순수 계산."""
-    total_balance = sum((a.balance for a in accounts), Decimal("0"))
-    total_cash = sum((a.cash or Decimal("0") for a in accounts), Decimal("0"))
-    total_valuation = sum(
-        (a.portfolio_valuation or Decimal("0") for a in accounts), Decimal("0"),
-    )
-    total_cost = sum(
-        (a.portfolio_cost or Decimal("0") for a in accounts), Decimal("0"),
-    )
-    total_profit = sum(
-        (a.portfolio_profit_loss or Decimal("0") for a in accounts), Decimal("0"),
-    )
-    total_rate = (
-        (total_profit / total_cost * Decimal("100")) if total_cost > 0 else Decimal("0")
-    )
-    return PortfolioOverviewSummary(
-        total_balance=total_balance,
-        total_cash=total_cash,
-        total_valuation=total_valuation,
-        total_cost=total_cost,
-        total_profit=total_profit,
-        total_rate=total_rate,
-    )
-
-
-def _group_portfolios_by_account(
-    items: list, account_map: dict[UUID, Account],
-) -> dict[UUID, list[PortfolioResponse]]:
-    """보유 종목을 계좌별 종목 응답 리스트로 그룹화 (account_map 에 없는 계좌는 제외)."""
-    grouped: dict[UUID, list[PortfolioResponse]] = {}
-    for it in items:
-        if it.account_id not in account_map:
-            continue
-        grouped.setdefault(it.account_id, []).append(_build_response(it, account_map))
-    return grouped
-
-
 async def get_portfolio_overview(
     db: AsyncSession, household: Household,
 ) -> PortfolioOverviewResponse:
@@ -870,3 +654,218 @@ async def get_portfolio_form_options(
         db, household, account_type=AccountType.INVESTMENT.value, is_archived=False,
     )
     return PortfolioFormOptionsResponse(investment_accounts=accounts)
+
+
+def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse:
+    account = account_map.get(item.account_id)
+    cost = item.quantity * item.avg_price
+    valuation = item.quantity * item.current_price
+    profit_loss = valuation - cost
+    profit_loss_rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0.00")
+
+    return PortfolioResponse(
+        id=item.id,
+        account_id=item.account_id,
+        account_name=account.name if account else "(삭제됨)",
+        name=item.name,
+        code=item.code,
+        market=Market(item.market),
+        quantity=item.quantity,
+        avg_price=item.avg_price,
+        current_price=item.current_price,
+        cost=cost,
+        valuation=valuation,
+        profit_loss=profit_loss,
+        profit_loss_rate=profit_loss_rate,
+        is_archived=item.is_archived,
+    )
+
+
+def _build_tx_response(tx: PortfolioTransaction, account_map: dict) -> PortfolioTxResponse:
+    account = account_map.get(tx.account_id)
+    return PortfolioTxResponse(
+        id=tx.id,
+        account_id=tx.account_id,
+        account_name=account.name if account else "(삭제됨)",
+        name=tx.name,
+        code=tx.code,
+        market=Market(tx.market),
+        pt_type=tx.pt_type,
+        quantity=tx.quantity,
+        price=tx.price,
+        total=tx.quantity * tx.price,
+        tx_date=tx.tx_date,
+        memo=tx.memo,
+        realized_pnl=tx.realized_pnl,
+    )
+
+
+async def _validate_investment_account(
+    db: AsyncSession, household_id: UUID, account_id: UUID,
+):
+    """INVESTMENT 통장이고 같은 가계부 소속인지 검증"""
+    accounts = await AccountRepository(db).find_by_ids([account_id])
+    if not accounts:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    a = accounts[0]
+    if a.household_id != household_id or a.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    if a.account_type != AccountType.INVESTMENT:
+        raise CustomException(ErrorCode.BAD_REQUEST)
+    return a
+
+
+def _recompute_realized_pnl(
+    txs: list[PortfolioTransaction],
+) -> tuple[Decimal, Decimal]:
+    """거래를 시간순 replay 하며 각 SELL 의 실현손익을 그 시점 평단으로 재박제.
+
+    거래 수정/삭제로 평단이 바뀌면 과거 SELL 의 박제값이 틀어지므로,
+    매도시점 누적 이동평균(running_avg)으로 다시 계산해 SELL row 를 갱신한다.
+    txs 의 price 는 이미 KRW 박제값이라 환율 변환 불필요.
+
+    반환: replay 종료 시점의 (남은 수량, 남은 원가) — 호출부의 평단 재계산용.
+    """
+    running_qty = Decimal("0")
+    running_cost = Decimal("0")
+    for t in txs:
+        if t.pt_type == PortfolioTxType.BUY:
+            running_qty += t.quantity
+            running_cost += t.quantity * t.price
+        elif t.pt_type == PortfolioTxType.SELL:
+            running_avg = running_cost / running_qty if running_qty > 0 else Decimal("0")
+            t.realized_cost_basis = (running_avg * t.quantity).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP,
+            )
+            t.realized_pnl = (
+                (t.price - running_avg) * t.quantity
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            # 매도는 평단 불변 — 수량/원가를 평단 비율로 차감 (running_avg 유지)
+            running_cost -= running_avg * t.quantity
+            running_qty -= t.quantity
+    return running_qty, running_cost
+
+
+async def _recalc_item_from_transactions(
+    db: AsyncSession, item: PortfolioItem,
+) -> None:
+    """종목의 활성 거래 시간순 replay → quantity / avg_price 재계산.
+
+    이동평균: 매도 시점 평단으로 원가를 차감하므로 매도 후 재매수도 정확히
+    반영된다(단순 전체매수합/전체매수량은 평단을 왜곡). 매도 실현손익 재박제와
+    같은 replay 를 공유한다. 매도가 매수보다 많으면 BAD_REQUEST.
+    """
+    pt_repo = PortfolioTransactionRepository(db)
+    txs = await pt_repo.find_active_by_item_id(item.id)
+
+    remaining_qty, remaining_cost = _recompute_realized_pnl(txs)
+    if remaining_qty < 0:
+        raise CustomException(ErrorCode.BAD_REQUEST)
+
+    item.quantity = remaining_qty
+    item.avg_price = (
+        remaining_cost / remaining_qty if remaining_qty > 0 else Decimal("0.00")
+    )
+    # 거래 수정/삭제로 수량이 0→양수면 종목 부활, 양수→0이면 소멸(전량매도와 동일).
+    item.data_stat_cd = DataStatus.ACTIVE if remaining_qty > 0 else DataStatus.DELETED
+    await db.flush()
+
+
+def _default_month_range(
+    from_date: date | None, to_date: date | None,
+) -> tuple[date, date]:
+    """월별 스냅샷 추이 전용 — from/to 를 그달 1일로 정규화. 미지정 시 최근 12개월.
+
+    account-snapshot/yearly 와 동일 컨벤션. 일 단위 필터(매매손익)는 월 정규화하면
+    안 되므로 _default_day_range 를 쓴다.
+    """
+    today = today_kst().replace(day=1)
+    if not to_date:
+        to_date = today
+    else:
+        to_date = to_date.replace(day=1)
+    if not from_date:
+        total = to_date.year * 12 + (to_date.month - 1) - 11
+        y, m = divmod(total, 12)
+        from_date = date(y, m + 1, 1)
+    else:
+        from_date = from_date.replace(day=1)
+    return from_date, to_date
+
+
+def _default_day_range(
+    from_date: date | None, to_date: date | None,
+) -> tuple[date, date]:
+    """매매손익 전용 — 일 단위 자유 필터. 월 정규화 없음. 미지정 시 최근 12개월."""
+    if not to_date:
+        to_date = today_kst()
+    if not from_date:
+        try:
+            from_date = to_date.replace(year=to_date.year - 1)
+        except ValueError:  # 2/29 → 전년 2/28
+            from_date = to_date.replace(year=to_date.year - 1, day=28)
+    return from_date, to_date
+
+
+def _to_history_point(row: PortfolioValueHistory) -> PortfolioValueHistoryPoint:
+    return PortfolioValueHistoryPoint(
+        snapshot_date=row.snapshot_date,
+        quantity=row.quantity,
+        avg_price=row.avg_price,
+        current_price=row.current_price,
+        cost=row.cost,
+        valuation=row.valuation,
+    )
+
+
+# =========================================================
+# Page-level overview / form-options (페이지 진입 시 1호출)
+# =========================================================
+
+
+def _zero_summary() -> PortfolioOverviewSummary:
+    z = Decimal("0")
+    return PortfolioOverviewSummary(
+        total_balance=z, total_cash=z, total_valuation=z,
+        total_cost=z, total_profit=z, total_rate=z,
+    )
+
+
+def _summarize_investment_accounts(
+    accounts: list[AccountResponse],
+) -> PortfolioOverviewSummary:
+    """INVESTMENT 계좌들의 총합 — balance/cash/valuation/cost/profit + 손익률. 순수 계산."""
+    total_balance = sum((a.balance for a in accounts), Decimal("0"))
+    total_cash = sum((a.cash or Decimal("0") for a in accounts), Decimal("0"))
+    total_valuation = sum(
+        (a.portfolio_valuation or Decimal("0") for a in accounts), Decimal("0"),
+    )
+    total_cost = sum(
+        (a.portfolio_cost or Decimal("0") for a in accounts), Decimal("0"),
+    )
+    total_profit = sum(
+        (a.portfolio_profit_loss or Decimal("0") for a in accounts), Decimal("0"),
+    )
+    total_rate = (
+        (total_profit / total_cost * Decimal("100")) if total_cost > 0 else Decimal("0")
+    )
+    return PortfolioOverviewSummary(
+        total_balance=total_balance,
+        total_cash=total_cash,
+        total_valuation=total_valuation,
+        total_cost=total_cost,
+        total_profit=total_profit,
+        total_rate=total_rate,
+    )
+
+
+def _group_portfolios_by_account(
+    items: list, account_map: dict[UUID, Account],
+) -> dict[UUID, list[PortfolioResponse]]:
+    """보유 종목을 계좌별 종목 응답 리스트로 그룹화 (account_map 에 없는 계좌는 제외)."""
+    grouped: dict[UUID, list[PortfolioResponse]] = {}
+    for it in items:
+        if it.account_id not in account_map:
+            continue
+        grouped.setdefault(it.account_id, []).append(_build_response(it, account_map))
+    return grouped

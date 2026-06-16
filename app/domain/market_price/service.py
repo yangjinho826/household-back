@@ -39,25 +39,6 @@ class RefreshResult:
     updated_rows: int   # DB row 업데이트 수
 
 
-def _chunks(items: list, size: int) -> Iterator[list]:
-    for i in range(0, len(items), size):
-        yield items[i : i + size]
-
-
-async def _fetch_one(
-    code: str, market: Market, fx_rate: Decimal | None,
-) -> Decimal | None:
-    """시장별 1:1 야후 심볼로 1번 호출. USD 시장이면 fx_rate 곱해 KRW 환산."""
-    symbol = build_yahoo_symbol(market, code)
-    quote = await fetch_chart_quote(symbol)
-    if quote is None or quote.price <= 0:
-        return None
-    price = quote.price
-    if market in _USD_MARKETS and fx_rate is not None:
-        price = price * fx_rate
-    return price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
 async def refresh(
     session: AsyncSession,
     markets: list[Market],
@@ -137,3 +118,22 @@ async def refresh(
         [m.value for m in markets], fetched, skipped, updated_rows,
     )
     return RefreshResult(fetched=fetched, skipped=skipped, updated_rows=updated_rows)
+
+
+def _chunks(items: list, size: int) -> Iterator[list]:
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
+
+
+async def _fetch_one(
+    code: str, market: Market, fx_rate: Decimal | None,
+) -> Decimal | None:
+    """시장별 1:1 야후 심볼로 1번 호출. USD 시장이면 fx_rate 곱해 KRW 환산."""
+    symbol = build_yahoo_symbol(market, code)
+    quote = await fetch_chart_quote(symbol)
+    if quote is None or quote.price <= 0:
+        return None
+    price = quote.price
+    if market in _USD_MARKETS and fx_rate is not None:
+        price = price * fx_rate
+    return price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

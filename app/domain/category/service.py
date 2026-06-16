@@ -19,19 +19,6 @@ from app.domain.household.model import Household
 logger = logging.getLogger(__name__)
 
 
-def _build_response(category: Category) -> CategoryResponse:
-    return CategoryResponse(
-        id=category.id,
-        household_id=category.household_id,
-        kind=CategoryKind(category.kind),
-        name=category.name,
-        color=category.color,
-        icon=category.icon,
-        sort_order=category.sort_order,
-        is_archived=category.is_archived,
-    )
-
-
 async def list_categories(
     db: AsyncSession,
     household: Household,
@@ -173,3 +160,16 @@ async def get_category_detail(
     if not category or category.household_id != household.id or category.data_stat_cd != DataStatus.ACTIVE:
         raise CustomException(ErrorCode.NOT_FOUND)
     return _build_response(category)
+
+
+def _build_response(category: Category) -> CategoryResponse:
+    return CategoryResponse(
+        id=category.id,
+        household_id=category.household_id,
+        kind=CategoryKind(category.kind),
+        name=category.name,
+        color=category.color,
+        icon=category.icon,
+        sort_order=category.sort_order,
+        is_archived=category.is_archived,
+    )

@@ -39,18 +39,6 @@ from app.domain.user.repository import UserRepository
 logger = logging.getLogger(__name__)
 
 
-def _build_response(household: Household, role: HouseholdRole) -> HouseholdResponse:
-    return HouseholdResponse(
-        id=household.id,
-        name=household.name,
-        description=household.description,
-        owner_id=household.owner_id,
-        currency=household.currency,
-        started_at=household.started_at,
-        role=role,
-    )
-
-
 async def list_households(
     db: AsyncSession, current_user: User,
 ) -> HouseholdListResponse:
@@ -130,49 +118,6 @@ async def update_household(
     return _build_response(household, HouseholdRole.OWNER)
 
 
-# 가계부 삭제 시 함께 soft-delete 할 자식 (모두 household_id 보유).
-# account_snapshots 는 household_id 가 없어 account_id 기반으로 별도 처리.
-_CHILD_MODELS_WITH_HOUSEHOLD_ID = (
-    Account,
-    Category,
-    Transaction,
-    PortfolioItem,
-    PortfolioTransaction,
-    PortfolioValueHistory,
-    FixedExpense,
-    HouseholdMember,
-)
-
-
-async def _cascade_soft_delete_children(db: AsyncSession, household_id: UUID) -> None:
-    """가계부의 모든 활성 자식을 soft-delete. soft-delete 라 순서 무관(FK cascade 아님)."""
-    for model in _CHILD_MODELS_WITH_HOUSEHOLD_ID:
-        await db.execute(
-            update(model)
-            .where(
-                and_(
-                    model.household_id == household_id,
-                    model.data_stat_cd == DataStatus.ACTIVE,
-                )
-            )
-            .values(data_stat_cd=DataStatus.DELETED)
-        )
-    # account_snapshots — household 의 통장 id 들로 (통장은 위에서 이미 soft-delete 됐지만
-    # 행은 남아있어 household_id 매칭 select 는 그대로 동작)
-    await db.execute(
-        update(AccountSnapshot)
-        .where(
-            and_(
-                AccountSnapshot.account_id.in_(
-                    select(Account.id).where(Account.household_id == household_id)
-                ),
-                AccountSnapshot.data_stat_cd == DataStatus.ACTIVE,
-            )
-        )
-        .values(data_stat_cd=DataStatus.DELETED)
-    )
-
-
 async def delete_household(
     db: AsyncSession, household_id: UUID, current_user: User,
 ) -> None:
@@ -188,44 +133,6 @@ async def delete_household(
     household.data_stat_cd = DataStatus.DELETED
     await db.flush()
     logger.info("가계부 cascade 삭제 (household_id=%s)", household_id)
-
-
-def _build_member_response(
-    member: HouseholdMember, user: User | None,
-) -> HouseholdMemberResponse:
-    return HouseholdMemberResponse(
-        id=member.id,
-        household_id=member.household_id,
-        user_id=member.user_id,
-        user_name=user.name if user else None,
-        user_email=user.email if user else None,
-        role=HouseholdRole(member.role),
-        joined_at=member.joined_at,
-    )
-
-
-async def _require_membership(
-    db: AsyncSession, household_id: UUID, user_id: UUID,
-) -> HouseholdMember:
-    """현재 user 가 해당 household 멤버인지 검증, 멤버 반환"""
-    member_repo = HouseholdMemberRepository(db)
-    membership = await member_repo.find_by_household_and_user(household_id, user_id)
-    if not membership:
-        raise CustomException(ErrorCode.HOUSEHOLD_NOT_MEMBER)
-    return membership
-
-
-async def _require_owner(
-    db: AsyncSession, household_id: UUID, user_id: UUID,
-) -> Household:
-    """owner 권한 검증, household 반환"""
-    repo = HouseholdRepository(db)
-    household = await repo.find_by_id(household_id)
-    if not household:
-        raise CustomException(ErrorCode.HOUSEHOLD_NOT_FOUND)
-    if household.owner_id != user_id:
-        raise CustomException(ErrorCode.HOUSEHOLD_NOT_OWNER)
-    return household
 
 
 async def list_household_members(
@@ -328,3 +235,96 @@ async def get_household_detail(
         else HouseholdRole(membership.role)
     )
     return _build_response(household, role)
+
+
+def _build_response(household: Household, role: HouseholdRole) -> HouseholdResponse:
+    return HouseholdResponse(
+        id=household.id,
+        name=household.name,
+        description=household.description,
+        owner_id=household.owner_id,
+        currency=household.currency,
+        started_at=household.started_at,
+        role=role,
+    )
+
+
+# 가계부 삭제 시 함께 soft-delete 할 자식 (모두 household_id 보유).
+# account_snapshots 는 household_id 가 없어 account_id 기반으로 별도 처리.
+_CHILD_MODELS_WITH_HOUSEHOLD_ID = (
+    Account,
+    Category,
+    Transaction,
+    PortfolioItem,
+    PortfolioTransaction,
+    PortfolioValueHistory,
+    FixedExpense,
+    HouseholdMember,
+)
+
+
+async def _cascade_soft_delete_children(db: AsyncSession, household_id: UUID) -> None:
+    """가계부의 모든 활성 자식을 soft-delete. soft-delete 라 순서 무관(FK cascade 아님)."""
+    for model in _CHILD_MODELS_WITH_HOUSEHOLD_ID:
+        await db.execute(
+            update(model)
+            .where(
+                and_(
+                    model.household_id == household_id,
+                    model.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .values(data_stat_cd=DataStatus.DELETED)
+        )
+    # account_snapshots — household 의 통장 id 들로 (통장은 위에서 이미 soft-delete 됐지만
+    # 행은 남아있어 household_id 매칭 select 는 그대로 동작)
+    await db.execute(
+        update(AccountSnapshot)
+        .where(
+            and_(
+                AccountSnapshot.account_id.in_(
+                    select(Account.id).where(Account.household_id == household_id)
+                ),
+                AccountSnapshot.data_stat_cd == DataStatus.ACTIVE,
+            )
+        )
+        .values(data_stat_cd=DataStatus.DELETED)
+    )
+
+
+def _build_member_response(
+    member: HouseholdMember, user: User | None,
+) -> HouseholdMemberResponse:
+    return HouseholdMemberResponse(
+        id=member.id,
+        household_id=member.household_id,
+        user_id=member.user_id,
+        user_name=user.name if user else None,
+        user_email=user.email if user else None,
+        role=HouseholdRole(member.role),
+        joined_at=member.joined_at,
+    )
+
+
+async def _require_membership(
+    db: AsyncSession, household_id: UUID, user_id: UUID,
+) -> HouseholdMember:
+    """현재 user 가 해당 household 멤버인지 검증, 멤버 반환"""
+    member_repo = HouseholdMemberRepository(db)
+    membership = await member_repo.find_by_household_and_user(household_id, user_id)
+    if not membership:
+        raise CustomException(ErrorCode.HOUSEHOLD_NOT_MEMBER)
+    return membership
+
+
+async def _require_owner(
+    db: AsyncSession, household_id: UUID, user_id: UUID,
+) -> Household:
+    """owner 권한 검증, household 반환"""
+    repo = HouseholdRepository(db)
+    household = await repo.find_by_id(household_id)
+    if not household:
+        raise CustomException(ErrorCode.HOUSEHOLD_NOT_FOUND)
+    if household.owner_id != user_id:
+        raise CustomException(ErrorCode.HOUSEHOLD_NOT_OWNER)
+    return household

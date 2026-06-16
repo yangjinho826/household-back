@@ -22,36 +22,6 @@ from app.domain.transaction.repository import TransactionRepository
 logger = logging.getLogger(__name__)
 
 
-def _build_response(fixed: FixedExpense, category_map: dict) -> FixedResponse:
-    category = category_map.get(fixed.category_id) if fixed.category_id else None
-    return FixedResponse(
-        id=fixed.id,
-        household_id=fixed.household_id,
-        name=fixed.name,
-        day_of_month=fixed.day_of_month,
-        category_id=fixed.category_id,
-        category_name=category.name if category else None,
-        category_color=category.color if category else None,
-        category_icon=category.icon if category else None,
-        color=fixed.color,
-        icon=fixed.icon,
-        sort_order=fixed.sort_order,
-        is_archived=fixed.is_archived,
-    )
-
-
-async def _validate_category(
-    db: AsyncSession, household_id: UUID, category_id: UUID,
-) -> None:
-    """category_id 가 같은 household 의 active 카테고리인지 검증"""
-    categories = await CategoryRepository(db).find_by_ids([category_id])
-    if not categories:
-        raise CustomException(ErrorCode.NOT_FOUND)
-    c = categories[0]
-    if c.household_id != household_id or c.data_stat_cd != DataStatus.ACTIVE:
-        raise CustomException(ErrorCode.NOT_FOUND)
-
-
 async def list_fixed_expenses(
     db: AsyncSession,
     household: Household,
@@ -228,3 +198,33 @@ async def get_monthly_summary(
         for fid, total in rows
     ]
     return FixedMonthlySummaryResponse(month=f"{year:04d}-{month:02d}", items=items)
+
+
+def _build_response(fixed: FixedExpense, category_map: dict) -> FixedResponse:
+    category = category_map.get(fixed.category_id) if fixed.category_id else None
+    return FixedResponse(
+        id=fixed.id,
+        household_id=fixed.household_id,
+        name=fixed.name,
+        day_of_month=fixed.day_of_month,
+        category_id=fixed.category_id,
+        category_name=category.name if category else None,
+        category_color=category.color if category else None,
+        category_icon=category.icon if category else None,
+        color=fixed.color,
+        icon=fixed.icon,
+        sort_order=fixed.sort_order,
+        is_archived=fixed.is_archived,
+    )
+
+
+async def _validate_category(
+    db: AsyncSession, household_id: UUID, category_id: UUID,
+) -> None:
+    """category_id 가 같은 household 의 active 카테고리인지 검증"""
+    categories = await CategoryRepository(db).find_by_ids([category_id])
+    if not categories:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    c = categories[0]
+    if c.household_id != household_id or c.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)

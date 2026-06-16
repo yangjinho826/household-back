@@ -37,6 +37,294 @@ from app.domain.user.model import User
 logger = logging.getLogger(__name__)
 
 
+async def list_transactions(
+    db: AsyncSession,
+    household: Household,
+    f: TransactionFilter,
+    cursor: str | None,
+    limit: int,
+) -> TransactionListResponse:
+    repo = TransactionRepository(db)
+    rows = await repo.list_by_cursor(household.id, f, cursor, limit)
+    total = await repo.count(household.id, f)
+
+    has_next = len(rows) > limit
+    items_rows = rows[:limit]
+
+    # account/category 일괄 조회
+    account_ids = {r.account_id for r in items_rows}
+    account_ids.update({r.to_account_id for r in items_rows if r.to_account_id})
+    category_ids = {r.category_id for r in items_rows if r.category_id}
+
+    accounts = await AccountRepository(db).find_by_ids(list(account_ids))
+    categories = await CategoryRepository(db).find_by_ids(list(category_ids))
+    account_map = {a.id: a for a in accounts}
+    category_map = {c.id: c for c in categories}
+
+    items = [_build_response(r, account_map, category_map) for r in items_rows]
+
+    next_cursor = None
+    if has_next:
+        last = items_rows[-1]
+        next_cursor = (
+            f"{last.tx_date.isoformat()}|{last.frst_reg_dt.isoformat()}|{last.id}"
+        )
+
+    return TransactionListResponse(
+        items=items,
+        next_cursor=next_cursor,
+        has_next=has_next,
+        total_count=total,
+    )
+
+
+async def list_account_ledger(
+    db: AsyncSession,
+    household: Household,
+    account_id: UUID,
+    cursor: str | None,
+    limit: int,
+    year: int | None = None,
+    month: int | None = None,
+) -> AccountLedgerPage:
+    """계좌별 거래 이력 — 각 행에 running balance(거래 후 잔액).
+
+    잔액은 "기준 잔액에서 desc 로 역산". 첫 페이지 첫 행의 잔액 = 그 시점까지의
+    누적 현금흐름 잔액, 한 칸 옛 거래로 내려갈 때마다 위 행의 signed_amount 를
+    빼서 그 아래 잔액을 만든다. 페이지 경계는 carry 를 커서에 실어 이어붙인다.
+
+    year+month 를 주면 그 달 거래만(거래 탭). 기준점은 "그 달 말까지의 누적 잔액"
+    이라 미래 달 거래와 무관하게 그 달 안에서 잔액이 맞는다. 없으면 전체(계좌 상세).
+    """
+    repo = TransactionRepository(db)
+    account = await AccountRepository(db).find_by_id(account_id)
+    if account is None or account.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    # 모든 통장 타입 허용 — 현금흐름/수동자산은 running balance 정확, INVESTMENT 는
+    # 매매현금이 거래 밖이라 잔액은 부정확(프론트에서 잔액 표시를 숨긴다).
+
+    tx_cursor, carry = _split_ledger_cursor(cursor)
+    f, balance_to_date = _ledger_filter(account_id, year, month)
+    rows = await repo.list_by_cursor(household.id, f, tx_cursor, limit)
+    total = await repo.count(household.id, f)
+
+    has_next = len(rows) > limit
+    items_rows = rows[:limit]
+
+    start_balance = await _ledger_start_balance(repo, account, carry, balance_to_date)
+    account_map, category_map = await _load_ledger_maps(db, items_rows)
+    items, running = _build_ledger_items(
+        items_rows, account_id, account_map, category_map, start_balance,
+    )
+
+    next_cursor = None
+    if has_next:
+        last = items_rows[-1]
+        next_cursor = (
+            f"{last.tx_date.isoformat()}|{last.frst_reg_dt.isoformat()}"
+            f"|{last.id}|{running}"
+        )
+
+    return AccountLedgerPage(
+        items=items,
+        next_cursor=next_cursor,
+        has_next=has_next,
+        total_count=total,
+    )
+
+
+async def create_transaction(
+    db: AsyncSession,
+    household: Household,
+    req: TransactionCreateRequest,
+    current_user: User,
+) -> TransactionResponse:
+    account_ids = [req.account_id]
+    if req.to_account_id is not None:
+        account_ids.append(req.to_account_id)
+    category_ids = [req.category_id] if req.category_id else []
+    await _validate_fk_belong_to_household(
+        db, household.id, account_ids, category_ids, tx_type=req.tx_type,
+    )
+    await _validate_fixed_belongs(db, household.id, req.fixed_expense_id)
+
+    tx = Transaction(
+        household_id=household.id,
+        tx_type=req.tx_type,
+        amount=req.amount,
+        tx_date=req.tx_date,
+        account_id=req.account_id,
+        to_account_id=req.to_account_id if req.tx_type == TxType.TRANSFER else None,
+        category_id=req.category_id,
+        paid_by_user_id=req.paid_by_user_id or current_user.id,
+        fixed_expense_id=req.fixed_expense_id,
+        memo=req.memo,
+        valuation_direction=(
+            req.valuation_direction.value
+            if req.tx_type == TxType.VALUATION and req.valuation_direction
+            else None
+        ),
+        data_stat_cd=DataStatus.ACTIVE,
+    )
+    await TransactionRepository(db).save(tx)
+    logger.info("거래 생성 (tx_id=%s, type=%s, amount=%s)", tx.id, req.tx_type, req.amount)
+    return await _single_response(db, tx)
+
+
+async def update_transaction(
+    db: AsyncSession,
+    household: Household,
+    tx_id: UUID,
+    req: TransactionUpdateRequest,
+) -> TransactionResponse:
+    repo = TransactionRepository(db)
+    tx = await repo.find_by_id(tx_id)
+    if not tx or tx.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    await _validate_update_fks(db, household, tx, req)
+    _apply_partial_update(tx, req)
+    _normalize_to_account(tx)
+    _validate_transfer_consistency(tx)
+
+    await db.flush()
+    return await _single_response(db, tx)
+
+
+async def delete_transaction(
+    db: AsyncSession, household: Household, tx_id: UUID,
+) -> None:
+    repo = TransactionRepository(db)
+    tx = await repo.find_by_id(tx_id)
+    if not tx or tx.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+    tx.data_stat_cd = DataStatus.DELETED
+    await db.flush()
+    logger.info("거래 삭제 (tx_id=%s)", tx_id)
+
+
+async def get_transaction_detail(
+    db: AsyncSession, household: Household, tx_id: UUID,
+) -> TransactionResponse:
+    """거래 단건 조회 — account/category 조인 필드 포함"""
+    repo = TransactionRepository(db)
+    tx = await repo.find_by_id(tx_id)
+    if not tx or tx.household_id != household.id or tx.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    return await _single_response(db, tx)
+
+
+async def get_calendar_full(
+    db: AsyncSession, household: Household, year: int, month: int,
+) -> CalendarFullResponse:
+    """달력 페이지 1호출 — calendar(일별 합계) + stats(카테고리별) + 그달 거래 전부."""
+    # 순환 import 방지 — 함수 안에서 import
+    from app.domain.stats import service as stats_service
+
+    calendar = await get_calendar(db, household, year, month)
+    stats = await stats_service.get_monthly_stats(db, household, year, month)
+
+    f = TransactionFilter(year=year, month=month)
+    # 한 달치 거래 — 가계부 평균 100 미만이라 cursor 페이징 불필요, 큰 limit 로 통째.
+    tx_page = await list_transactions(db, household, f, cursor=None, limit=500)
+
+    return CalendarFullResponse(
+        year=calendar.year,
+        month=calendar.month,
+        monthly_income=calendar.monthly_income,
+        monthly_expense=calendar.monthly_expense,
+        monthly_transfer=calendar.monthly_transfer,
+        days=calendar.days,
+        by_category=stats.by_category,
+        transactions=tx_page.items,
+    )
+
+
+async def get_form_options(
+    db: AsyncSession, household: Household,
+) -> TransactionFormOptionsResponse:
+    """거래 등록/수정 폼 옵션 — 통장 + 카테고리 + 활성 고정지출 한 번에."""
+    # 순환 import 방지
+    from app.domain.account import service as account_service
+    from app.domain.category import service as category_service
+    from app.domain.fixed import service as fixed_service
+
+    accounts = await account_service.list_accounts(db, household)
+    categories = await category_service.list_categories(db, household)
+    fixed_expenses = await fixed_service.list_fixed_expenses(
+        db, household, is_archived=False,
+    )
+
+    return TransactionFormOptionsResponse(
+        accounts=accounts,
+        categories=categories,
+        fixed_expenses=fixed_expenses,
+    )
+
+
+async def get_calendar(
+    db: AsyncSession, household: Household, year: int, month: int,
+) -> CalendarResponse:
+    """달력 뷰 — 일별 income/expense/transfer 합계 + 월간 합계"""
+    repo = TransactionRepository(db)
+    rows = await repo.daily_sums_for_month(household.id, year, month)
+
+    by_date: dict[date, dict] = {}
+    monthly_income = Decimal("0.00")
+    monthly_expense = Decimal("0.00")
+    monthly_transfer = Decimal("0.00")
+
+    for tx_date, tx_type, total, cnt in rows:
+        d = by_date.setdefault(
+            tx_date,
+            {
+                "income": Decimal("0.00"),
+                "expense": Decimal("0.00"),
+                "transfer": Decimal("0.00"),
+                "count": 0,
+            },
+        )
+        if tx_type == TxType.INCOME:
+            d["income"] += total
+            monthly_income += total
+        elif tx_type in (TxType.EXPENSE, TxType.FIXED_EXPENSE):
+            d["expense"] += total
+            monthly_expense += total
+        elif tx_type == TxType.TRANSFER:
+            d["transfer"] += total
+            monthly_transfer += total
+        d["count"] += cnt
+
+    days = [
+        CalendarDay(
+            date=d,
+            income=v["income"],
+            expense=v["expense"],
+            transfer=v["transfer"],
+            count=v["count"],
+        )
+        for d, v in sorted(by_date.items())
+    ]
+
+    return CalendarResponse(
+        year=year,
+        month=month,
+        monthly_income=monthly_income,
+        monthly_expense=monthly_expense,
+        monthly_transfer=monthly_transfer,
+        days=days,
+    )
+
+
+# 부분 업데이트(PATCH) 대상 필드 — req·tx 동일 이름. 추가 시 여기만 늘리면 된다.
+_TX_UPDATABLE_FIELDS = (
+    "tx_type", "amount", "tx_date", "account_id", "to_account_id",
+    "category_id", "paid_by_user_id", "fixed_expense_id", "memo",
+    "valuation_direction",
+)
+
+
 def _category_kind_matches(tx_type: TxType, kind: str) -> bool:
     """지출계열 거래엔 EXPENSE 카테고리, 수입 거래엔 INCOME 카테고리만 허용.
     kind 불일치 시 월합계(타입 기준)와 카테고리차트(kind 기준)가 어긋난다."""
@@ -96,47 +384,6 @@ async def _validate_fk_belong_to_household(
                 raise CustomException(ErrorCode.NOT_FOUND)
             if tx_type is not None and not _category_kind_matches(tx_type, c.kind):
                 raise CustomException(ErrorCode.BAD_REQUEST)
-
-
-async def list_transactions(
-    db: AsyncSession,
-    household: Household,
-    f: TransactionFilter,
-    cursor: str | None,
-    limit: int,
-) -> TransactionListResponse:
-    repo = TransactionRepository(db)
-    rows = await repo.list_by_cursor(household.id, f, cursor, limit)
-    total = await repo.count(household.id, f)
-
-    has_next = len(rows) > limit
-    items_rows = rows[:limit]
-
-    # account/category 일괄 조회
-    account_ids = {r.account_id for r in items_rows}
-    account_ids.update({r.to_account_id for r in items_rows if r.to_account_id})
-    category_ids = {r.category_id for r in items_rows if r.category_id}
-
-    accounts = await AccountRepository(db).find_by_ids(list(account_ids))
-    categories = await CategoryRepository(db).find_by_ids(list(category_ids))
-    account_map = {a.id: a for a in accounts}
-    category_map = {c.id: c for c in categories}
-
-    items = [_build_response(r, account_map, category_map) for r in items_rows]
-
-    next_cursor = None
-    if has_next:
-        last = items_rows[-1]
-        next_cursor = (
-            f"{last.tx_date.isoformat()}|{last.frst_reg_dt.isoformat()}|{last.id}"
-        )
-
-    return TransactionListResponse(
-        items=items,
-        next_cursor=next_cursor,
-        has_next=has_next,
-        total_count=total,
-    )
 
 
 def _build_response(
@@ -276,107 +523,6 @@ def _build_ledger_items(
     return items, running
 
 
-async def list_account_ledger(
-    db: AsyncSession,
-    household: Household,
-    account_id: UUID,
-    cursor: str | None,
-    limit: int,
-    year: int | None = None,
-    month: int | None = None,
-) -> AccountLedgerPage:
-    """계좌별 거래 이력 — 각 행에 running balance(거래 후 잔액).
-
-    잔액은 "기준 잔액에서 desc 로 역산". 첫 페이지 첫 행의 잔액 = 그 시점까지의
-    누적 현금흐름 잔액, 한 칸 옛 거래로 내려갈 때마다 위 행의 signed_amount 를
-    빼서 그 아래 잔액을 만든다. 페이지 경계는 carry 를 커서에 실어 이어붙인다.
-
-    year+month 를 주면 그 달 거래만(거래 탭). 기준점은 "그 달 말까지의 누적 잔액"
-    이라 미래 달 거래와 무관하게 그 달 안에서 잔액이 맞는다. 없으면 전체(계좌 상세).
-    """
-    repo = TransactionRepository(db)
-    account = await AccountRepository(db).find_by_id(account_id)
-    if account is None or account.household_id != household.id:
-        raise CustomException(ErrorCode.NOT_FOUND)
-    # 모든 통장 타입 허용 — 현금흐름/수동자산은 running balance 정확, INVESTMENT 는
-    # 매매현금이 거래 밖이라 잔액은 부정확(프론트에서 잔액 표시를 숨긴다).
-
-    tx_cursor, carry = _split_ledger_cursor(cursor)
-    f, balance_to_date = _ledger_filter(account_id, year, month)
-    rows = await repo.list_by_cursor(household.id, f, tx_cursor, limit)
-    total = await repo.count(household.id, f)
-
-    has_next = len(rows) > limit
-    items_rows = rows[:limit]
-
-    start_balance = await _ledger_start_balance(repo, account, carry, balance_to_date)
-    account_map, category_map = await _load_ledger_maps(db, items_rows)
-    items, running = _build_ledger_items(
-        items_rows, account_id, account_map, category_map, start_balance,
-    )
-
-    next_cursor = None
-    if has_next:
-        last = items_rows[-1]
-        next_cursor = (
-            f"{last.tx_date.isoformat()}|{last.frst_reg_dt.isoformat()}"
-            f"|{last.id}|{running}"
-        )
-
-    return AccountLedgerPage(
-        items=items,
-        next_cursor=next_cursor,
-        has_next=has_next,
-        total_count=total,
-    )
-
-
-async def create_transaction(
-    db: AsyncSession,
-    household: Household,
-    req: TransactionCreateRequest,
-    current_user: User,
-) -> TransactionResponse:
-    account_ids = [req.account_id]
-    if req.to_account_id is not None:
-        account_ids.append(req.to_account_id)
-    category_ids = [req.category_id] if req.category_id else []
-    await _validate_fk_belong_to_household(
-        db, household.id, account_ids, category_ids, tx_type=req.tx_type,
-    )
-    await _validate_fixed_belongs(db, household.id, req.fixed_expense_id)
-
-    tx = Transaction(
-        household_id=household.id,
-        tx_type=req.tx_type,
-        amount=req.amount,
-        tx_date=req.tx_date,
-        account_id=req.account_id,
-        to_account_id=req.to_account_id if req.tx_type == TxType.TRANSFER else None,
-        category_id=req.category_id,
-        paid_by_user_id=req.paid_by_user_id or current_user.id,
-        fixed_expense_id=req.fixed_expense_id,
-        memo=req.memo,
-        valuation_direction=(
-            req.valuation_direction.value
-            if req.tx_type == TxType.VALUATION and req.valuation_direction
-            else None
-        ),
-        data_stat_cd=DataStatus.ACTIVE,
-    )
-    await TransactionRepository(db).save(tx)
-    logger.info("거래 생성 (tx_id=%s, type=%s, amount=%s)", tx.id, req.tx_type, req.amount)
-    return await _single_response(db, tx)
-
-
-# 부분 업데이트(PATCH) 대상 필드 — req·tx 동일 이름. 추가 시 여기만 늘리면 된다.
-_TX_UPDATABLE_FIELDS = (
-    "tx_type", "amount", "tx_date", "account_id", "to_account_id",
-    "category_id", "paid_by_user_id", "fixed_expense_id", "memo",
-    "valuation_direction",
-)
-
-
 async def _validate_update_fks(
     db: AsyncSession,
     household: Household,
@@ -424,50 +570,6 @@ def _validate_transfer_consistency(tx: Transaction) -> None:
             raise CustomException(ErrorCode.BAD_REQUEST)
 
 
-async def update_transaction(
-    db: AsyncSession,
-    household: Household,
-    tx_id: UUID,
-    req: TransactionUpdateRequest,
-) -> TransactionResponse:
-    repo = TransactionRepository(db)
-    tx = await repo.find_by_id(tx_id)
-    if not tx or tx.household_id != household.id:
-        raise CustomException(ErrorCode.NOT_FOUND)
-
-    await _validate_update_fks(db, household, tx, req)
-    _apply_partial_update(tx, req)
-    _normalize_to_account(tx)
-    _validate_transfer_consistency(tx)
-
-    await db.flush()
-    return await _single_response(db, tx)
-
-
-async def delete_transaction(
-    db: AsyncSession, household: Household, tx_id: UUID,
-) -> None:
-    repo = TransactionRepository(db)
-    tx = await repo.find_by_id(tx_id)
-    if not tx or tx.household_id != household.id:
-        raise CustomException(ErrorCode.NOT_FOUND)
-
-    tx.data_stat_cd = DataStatus.DELETED
-    await db.flush()
-    logger.info("거래 삭제 (tx_id=%s)", tx_id)
-
-
-async def get_transaction_detail(
-    db: AsyncSession, household: Household, tx_id: UUID,
-) -> TransactionResponse:
-    """거래 단건 조회 — account/category 조인 필드 포함"""
-    repo = TransactionRepository(db)
-    tx = await repo.find_by_id(tx_id)
-    if not tx or tx.household_id != household.id or tx.data_stat_cd != DataStatus.ACTIVE:
-        raise CustomException(ErrorCode.NOT_FOUND)
-    return await _single_response(db, tx)
-
-
 async def _single_response(db: AsyncSession, tx: Transaction) -> TransactionResponse:
     """단일 거래 응답 — account/category JOIN"""
     account_ids = [tx.account_id]
@@ -481,106 +583,4 @@ async def _single_response(db: AsyncSession, tx: Transaction) -> TransactionResp
         tx,
         {a.id: a for a in accounts},
         {c.id: c for c in categories},
-    )
-
-
-async def get_calendar_full(
-    db: AsyncSession, household: Household, year: int, month: int,
-) -> CalendarFullResponse:
-    """달력 페이지 1호출 — calendar(일별 합계) + stats(카테고리별) + 그달 거래 전부."""
-    # 순환 import 방지 — 함수 안에서 import
-    from app.domain.stats import service as stats_service
-
-    calendar = await get_calendar(db, household, year, month)
-    stats = await stats_service.get_monthly_stats(db, household, year, month)
-
-    f = TransactionFilter(year=year, month=month)
-    # 한 달치 거래 — 가계부 평균 100 미만이라 cursor 페이징 불필요, 큰 limit 로 통째.
-    tx_page = await list_transactions(db, household, f, cursor=None, limit=500)
-
-    return CalendarFullResponse(
-        year=calendar.year,
-        month=calendar.month,
-        monthly_income=calendar.monthly_income,
-        monthly_expense=calendar.monthly_expense,
-        monthly_transfer=calendar.monthly_transfer,
-        days=calendar.days,
-        by_category=stats.by_category,
-        transactions=tx_page.items,
-    )
-
-
-async def get_form_options(
-    db: AsyncSession, household: Household,
-) -> TransactionFormOptionsResponse:
-    """거래 등록/수정 폼 옵션 — 통장 + 카테고리 + 활성 고정지출 한 번에."""
-    # 순환 import 방지
-    from app.domain.account import service as account_service
-    from app.domain.category import service as category_service
-    from app.domain.fixed import service as fixed_service
-
-    accounts = await account_service.list_accounts(db, household)
-    categories = await category_service.list_categories(db, household)
-    fixed_expenses = await fixed_service.list_fixed_expenses(
-        db, household, is_archived=False,
-    )
-
-    return TransactionFormOptionsResponse(
-        accounts=accounts,
-        categories=categories,
-        fixed_expenses=fixed_expenses,
-    )
-
-
-async def get_calendar(
-    db: AsyncSession, household: Household, year: int, month: int,
-) -> CalendarResponse:
-    """달력 뷰 — 일별 income/expense/transfer 합계 + 월간 합계"""
-    repo = TransactionRepository(db)
-    rows = await repo.daily_sums_for_month(household.id, year, month)
-
-    by_date: dict[date, dict] = {}
-    monthly_income = Decimal("0.00")
-    monthly_expense = Decimal("0.00")
-    monthly_transfer = Decimal("0.00")
-
-    for tx_date, tx_type, total, cnt in rows:
-        d = by_date.setdefault(
-            tx_date,
-            {
-                "income": Decimal("0.00"),
-                "expense": Decimal("0.00"),
-                "transfer": Decimal("0.00"),
-                "count": 0,
-            },
-        )
-        if tx_type == TxType.INCOME:
-            d["income"] += total
-            monthly_income += total
-        elif tx_type in (TxType.EXPENSE, TxType.FIXED_EXPENSE):
-            d["expense"] += total
-            monthly_expense += total
-        elif tx_type == TxType.TRANSFER:
-            d["transfer"] += total
-            monthly_transfer += total
-        d["count"] += cnt
-
-    days = [
-        CalendarDay(
-            date=d,
-            income=v["income"],
-            expense=v["expense"],
-            transfer=v["transfer"],
-            count=v["count"],
-        )
-        for d, v in sorted(by_date.items())
-    ]
-
-    return CalendarResponse(
-        year=year,
-        month=month,
-        monthly_income=monthly_income,
-        monthly_expense=monthly_expense,
-        monthly_transfer=monthly_transfer,
-        days=days,
     )

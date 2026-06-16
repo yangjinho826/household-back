@@ -23,11 +23,6 @@ KST = ZoneInfo("Asia/Seoul")
 RECENT_TX_LIMIT = 10
 
 
-def _today_kst() -> tuple[int, int]:
-    now = datetime.now(KST)
-    return now.year, now.month
-
-
 async def get_home_overview(
     db: AsyncSession,
     household: Household,
@@ -58,3 +53,8 @@ async def get_home_overview(
         year=year,
         month=month,
     )
+
+
+def _today_kst() -> tuple[int, int]:
+    now = datetime.now(KST)
+    return now.year, now.month

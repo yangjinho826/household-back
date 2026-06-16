@@ -34,6 +34,97 @@ from app.domain.wealth.schema import (
 )
 
 
+# 수동자산/저축 전용계좌 → 자산군 슬라이스 매핑.
+# INVESTMENT(현금 분리)·일반계좌(전액 현금)는 별도 처리하므로 여기 없음.
+_ASSET_CLASS_BY_TYPE = {
+    AccountType.REAL_ESTATE: AssetClass.REAL_ESTATE,
+    AccountType.PENSION: AssetClass.PENSION,
+    AccountType.COMMODITY: AssetClass.COMMODITY,
+    AccountType.SAVINGS_ASSET: AssetClass.SAVINGS,
+}
+
+
+async def get_wealth_overview(
+    db: AsyncSession,
+    household: Household,
+    from_date: date | None,
+    to_date: date | None,
+) -> WealthOverviewResponse:
+    accounts = await account_service.list_accounts(db, household)
+    total_balance = sum((a.balance for a in accounts), Decimal("0"))
+
+    items = await PortfolioItemRepository(db).find_active_by_household_id(household.id)
+    current_allocation = _build_allocation(accounts, items)
+
+    # 월별 배분추이 — 박제된 스냅샷 재구성 (yearly_snapshots 와 동일 범위)
+    from_resolved, to_resolved = account_snapshot_service.resolve_snapshot_range(
+        from_date, to_date,
+    )
+    account_snapshots = await AccountSnapshotRepository(db).find_by_household_and_range(
+        household.id, from_resolved, to_resolved,
+    )
+    portfolio_histories = await PortfolioValueHistoryRepository(
+        db
+    ).find_by_household_and_range(household.id, from_resolved, to_resolved)
+    snapshot_account_ids = list({s.account_id for s in account_snapshots})
+    snapshot_accounts = await AccountRepository(db).find_by_ids(snapshot_account_ids)
+    allocation = AllocationResponse(
+        current_allocation=current_allocation,
+        allocation_trend=build_allocation_trend(
+            account_snapshots, portfolio_histories, snapshot_accounts,
+        ),
+    )
+
+    yearly = await account_snapshot_service.get_yearly_snapshots(
+        db, household, from_date, to_date,
+    )
+
+    return WealthOverviewResponse(
+        total_balance=total_balance,
+        accounts=accounts,
+        yearly_snapshots=yearly,
+        allocation=allocation,
+    )
+
+
+def build_allocation_trend(
+    account_snapshots: list[AccountSnapshot],
+    portfolio_histories: list[PortfolioValueHistory],
+    accounts: list[Account],
+) -> list[AllocationTrendPoint]:
+    """월별 자산군 배분추이 — 박제된 AccountSnapshot + PortfolioValueHistory 재구성.
+
+    종목 PVH valuation 은 전부 INVESTMENT 슬라이스로 합산하고, AccountSnapshot 은
+    계좌타입별로 분류(INVESTMENT 는 cash 역산). _add_snapshot_to_month 참고.
+    """
+    account_type_map = {a.id: a.account_type for a in accounts}
+
+    # (월, 계좌)별 종목 평가액 합 — INVESTMENT cash 역산용
+    pvh_by_account: dict[tuple[date, uuid.UUID], Decimal] = defaultdict(
+        lambda: Decimal("0")
+    )
+    trend: dict[date, dict[str, Decimal]] = defaultdict(
+        lambda: defaultdict(lambda: Decimal("0"))
+    )
+
+    for h in portfolio_histories:
+        pvh_by_account[(h.snapshot_date, h.account_id)] += h.valuation
+        trend[h.snapshot_date][AssetClass.INVESTMENT.value] += h.valuation
+
+    for s in account_snapshots:
+        _add_snapshot_to_month(
+            trend[s.snapshot_date],
+            account_type_map.get(s.account_id),
+            s.balance,
+            pvh_by_account[(s.snapshot_date, s.account_id)],
+        )
+
+    return [
+        AllocationTrendPoint(snapshot_date=d, slices=_slices_to_list(slices))
+        for d, slices in sorted(trend.items(), key=lambda kv: kv[0])
+    ]
+
+
 def _slices_to_list(slices: dict[str, Decimal]) -> list[AssetClassSlice]:
     """자산군별 누적액 dict → ratio 채운 슬라이스 리스트. 0값 제외, valuation desc."""
     total = sum(slices.values(), Decimal("0"))
@@ -48,16 +139,6 @@ def _slices_to_list(slices: dict[str, Decimal]) -> list[AssetClassSlice]:
     ]
     result.sort(key=lambda s: s.valuation, reverse=True)
     return result
-
-
-# 수동자산/저축 전용계좌 → 자산군 슬라이스 매핑.
-# INVESTMENT(현금 분리)·일반계좌(전액 현금)는 별도 처리하므로 여기 없음.
-_ASSET_CLASS_BY_TYPE = {
-    AccountType.REAL_ESTATE: AssetClass.REAL_ESTATE,
-    AccountType.PENSION: AssetClass.PENSION,
-    AccountType.COMMODITY: AssetClass.COMMODITY,
-    AccountType.SAVINGS_ASSET: AssetClass.SAVINGS,
-}
 
 
 def _build_allocation(
@@ -103,84 +184,3 @@ def _add_snapshot_to_month(
         month[_ASSET_CLASS_BY_TYPE[account_type].value] += balance
     else:
         month[AssetClass.CASH.value] += balance
-
-
-def build_allocation_trend(
-    account_snapshots: list[AccountSnapshot],
-    portfolio_histories: list[PortfolioValueHistory],
-    accounts: list[Account],
-) -> list[AllocationTrendPoint]:
-    """월별 자산군 배분추이 — 박제된 AccountSnapshot + PortfolioValueHistory 재구성.
-
-    종목 PVH valuation 은 전부 INVESTMENT 슬라이스로 합산하고, AccountSnapshot 은
-    계좌타입별로 분류(INVESTMENT 는 cash 역산). _add_snapshot_to_month 참고.
-    """
-    account_type_map = {a.id: a.account_type for a in accounts}
-
-    # (월, 계좌)별 종목 평가액 합 — INVESTMENT cash 역산용
-    pvh_by_account: dict[tuple[date, uuid.UUID], Decimal] = defaultdict(
-        lambda: Decimal("0")
-    )
-    trend: dict[date, dict[str, Decimal]] = defaultdict(
-        lambda: defaultdict(lambda: Decimal("0"))
-    )
-
-    for h in portfolio_histories:
-        pvh_by_account[(h.snapshot_date, h.account_id)] += h.valuation
-        trend[h.snapshot_date][AssetClass.INVESTMENT.value] += h.valuation
-
-    for s in account_snapshots:
-        _add_snapshot_to_month(
-            trend[s.snapshot_date],
-            account_type_map.get(s.account_id),
-            s.balance,
-            pvh_by_account[(s.snapshot_date, s.account_id)],
-        )
-
-    return [
-        AllocationTrendPoint(snapshot_date=d, slices=_slices_to_list(slices))
-        for d, slices in sorted(trend.items(), key=lambda kv: kv[0])
-    ]
-
-
-async def get_wealth_overview(
-    db: AsyncSession,
-    household: Household,
-    from_date: date | None,
-    to_date: date | None,
-) -> WealthOverviewResponse:
-    accounts = await account_service.list_accounts(db, household)
-    total_balance = sum((a.balance for a in accounts), Decimal("0"))
-
-    items = await PortfolioItemRepository(db).find_active_by_household_id(household.id)
-    current_allocation = _build_allocation(accounts, items)
-
-    # 월별 배분추이 — 박제된 스냅샷 재구성 (yearly_snapshots 와 동일 범위)
-    from_resolved, to_resolved = account_snapshot_service.resolve_snapshot_range(
-        from_date, to_date,
-    )
-    account_snapshots = await AccountSnapshotRepository(db).find_by_household_and_range(
-        household.id, from_resolved, to_resolved,
-    )
-    portfolio_histories = await PortfolioValueHistoryRepository(
-        db
-    ).find_by_household_and_range(household.id, from_resolved, to_resolved)
-    snapshot_account_ids = list({s.account_id for s in account_snapshots})
-    snapshot_accounts = await AccountRepository(db).find_by_ids(snapshot_account_ids)
-    allocation = AllocationResponse(
-        current_allocation=current_allocation,
-        allocation_trend=build_allocation_trend(
-            account_snapshots, portfolio_histories, snapshot_accounts,
-        ),
-    )
-
-    yearly = await account_snapshot_service.get_yearly_snapshots(
-        db, household, from_date, to_date,
-    )
-
-    return WealthOverviewResponse(
-        total_balance=total_balance,
-        accounts=accounts,
-        yearly_snapshots=yearly,
-        allocation=allocation,
-    )
