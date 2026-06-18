@@ -2,6 +2,7 @@
 
 ## 완료
 - [ ] 초기 셋업
+- [x] 2026-06-18: docs/codewalk 배치2/5 — 02-auth-user-household(인증/세대/CurrentHousehold) + 03-account(잔액=계산값/타입8종/is_archived). 톤 검수 통과 후 작성. Explore 정밀수집 + 핵심코드 직접확인.
 - [x] 2026-06-18: docs/codewalk 코드분석 가이드 착수 — README(목차)+00-overview+01-core-infra (배치1/5). FastAPI 입문 주니어 대상, codex 교차리뷰 반영. 계획: ~/.claude/plans/spicy-herding-zebra.md
 - [x] 2026-06-03: 통장/카테고리 삭제 정책 개편 (통장 cascade soft-delete D안 + 카테고리 차단 제거) + 프론트 무알림 6곳 fix + stats 회귀 fix
 - [x] 2026-06-03: codex 백엔드 전체 QA 7개 수정 (PATCH 이체 깨짐 / fixed_expense_id 검증 / 카테고리 kind / 종목 재계산 스킵 / 수동자산 cascade / 계좌 N+1 배치화 / bcrypt async) + 테스트 13개

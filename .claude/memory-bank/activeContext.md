@@ -6,12 +6,13 @@
 
 ## Status
 
-**배치1 완료** — `docs/codewalk/`:
-- `README.md` (시리즈 목차 + 도메인 의존성 지도 + 진행 현황)
-- `00-overview.md` (프로젝트 정체 · 4층 레이어드 · 요청 10단계 생애주기 · FastAPI 4개념 입문 · 공통 규약 · root_path 함정)
-- `01-core-infra.md` (get_db 트랜잭션 경계 · BaseEntity · ApiResponse · 예외체계 · JWT/CurrentUser · 멱등성 상태머신 · 스케줄러 5잡 · 페이징)
+**배치1·2 완료** — `docs/codewalk/`:
+- 배치1: `README.md` · `00-overview.md` · `01-core-infra.md`
+- **배치2 (방금 완료, 톤 검수 통과 후)**:
+  - `02-auth-user-household.md` (회원가입≠가계부생성 · access(body)+refresh(HttpOnly쿠키) · refresh 5개제한 · /refresh 2단검증(JWT+DB) · CurrentHousehold=X-Household-Id+멤버십 HH001 · owner 멤버 자동등록)
+  - `03-account.md` (잔액=저장X 계산값 · 타입8종→공식3그룹(일반/수동자산/투자) · _calc_balance · is_archived≠soft-delete · cascade 삭제 순서 · 목록 배치로드 N+1차단)
 
-톤/형식 사용자 검수 대기 중. **계획은 codex(외부모델) 교차리뷰 + 직접 코드검증 거쳐 개정됨** (계획파일: `~/.claude/plans/spicy-herding-zebra.md`).
+배치2 Explore 정밀수집 + 핵심코드 직접확인(deps.py·service.py·router.py) 거침. **계획파일: `~/.claude/plans/spicy-herding-zebra.md`**.
 
 ## Context
 
@@ -24,6 +25,6 @@
 
 ## Next Step
 
-1. 사용자 톤 검수 피드백 반영.
-2. **배치2** — `02-auth-user-household.md` (회원가입→로그인→토큰갱신 + 세대/멤버 + CurrentHousehold) + `03-account.md` (통장 타입·잔액 공식·is_archived). 영역 코드 Explore 정밀수집 → 입문자 톤 작성 → file:line 교차확인.
-3. 배치3~5 순차 (04·05 → 06·07 → 08).
+1. **배치3** — `04-category-transaction.md` (카테고리 + 거래: 수입/지출/이체 양방향 · income/expense/transfer 합계가 account 잔액에 반영되는 흐름 · VALUATION) + `05-fixed-snapshot.md` (고정지출 메타 + 스케줄러 월간 스냅샷). 영역 코드 Explore 정밀수집 → 입문자 톤 작성 → file:line 교차확인.
+2. 배치4~5 순차 (06·07 → 08).
+3. 03-account 에서 "거래합(sum_for_account)" 으로 미룬 부분(income/expense/transfer_out/transfer_in/valuation_net 실제 적재)을 04에서 받아 설명.
