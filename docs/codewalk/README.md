@@ -23,8 +23,8 @@
 |---|---|---|---|
 | **00** | [전체 그림](./00-overview.md) | 프로젝트 정체 · 4층 레이어드 구조 · 요청 10단계 생애주기 · FastAPI 4개념 입문 · 공통 규약 · 디렉토리 지도 | `router→service→repository→model`, `root_path`, `ApiResponse` |
 | **01** | [core 공통 토대](./01-core-infra.md) | 모든 도메인이 깔고 앉는 인프라 | `get_db`(트랜잭션), `BaseEntity`, 예외체계, JWT/`CurrentUser`, 멱등성, 스케줄러 5잡 |
-| **02** | 인증 · 유저 · 세대 *(예정)* | 회원가입 → 로그인/토큰갱신 → "부부가 한 세대로" | `JWT`, `CurrentHousehold`(X-Household-Id), 멤버 |
-| **03** | 계좌(account) *(예정)* | 통장의 모든 것 — 최기반 도메인 | 통장 타입, 잔액 공식, `is_archived` vs soft-delete |
+| **02** | [인증 · 유저 · 세대](./02-auth-user-household.md) | 회원가입 → 로그인/토큰갱신 → "부부가 한 세대로" | `JWT`(access/refresh), `CurrentHousehold`(X-Household-Id), `household_members` |
+| **03** | [계좌(account)](./03-account.md) | 통장의 모든 것 — 최기반 도메인 | 통장 타입 8종, 잔액=계산값(`start_balance+거래합`), `is_archived` vs soft-delete |
 | **04** | 카테고리 · 거래(transaction) *(예정)* | 가계부의 심장 — 수입/지출/이체 | `VALUATION`, 계좌 잔액 반영, 이체 양방향 |
 | **05** | 고정지출 · 스냅샷 *(예정)* | 매월 반복되는 것 · 월말 잔액 박제 | 고정지출 메타, 스케줄러가 만드는 월간 스냅샷 |
 | **06** | 포트폴리오 매매 *(예정)* | 투자 종목 보유·매매 | 평단(이동평균), 실현손익 replay, BUY/SELL |
@@ -78,7 +78,7 @@
 | 배치 | 문서 | 상태 |
 |---|---|---|
 | 1 | 00-overview, 01-core-infra | ✅ 완료 |
-| 2 | 02-auth-user-household, 03-account | ⏳ 예정 |
+| 2 | 02-auth-user-household, 03-account | ✅ 완료 |
 | 3 | 04-category-transaction, 05-fixed-snapshot | ⏳ 예정 |
 | 4 | 06-portfolio-trading, 07-pricing-snapshot-wealth | ⏳ 예정 |
 | 5 | 08-home-stats-settings | ⏳ 예정 |
