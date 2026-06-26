@@ -6,10 +6,11 @@
 
 ## Status
 
-**배치1·2·3 완료** — `docs/codewalk/`:
+**배치1·2·3·4 완료** — `docs/codewalk/`:
 - 배치1: `README.md` · `00-overview.md` · `01-core-infra.md`
 - 배치2: `02-auth-user-household.md` · `03-account.md`
 - 배치3: `04-category-transaction.md`(거래 5종·이체 한줄·sum_for_account·러닝밸런스·카테고리 orphan) + `05-fixed-snapshot.md`(고정지출 메타·월간 박제 catch-up/upsert·hard vs soft delete·스케줄러 5잡) — 둘 다 신규 7섹션 틀. 사용자 검수 04 생략(d), 05 미검수.
+- 배치4 (2026-06-26): `06-portfolio-trading.md`(17엔드포인트 6그룹·평단 replay·실현손익 박제·월별 평가액 박제·INVESTMENT 잔액공식 완결) + `07-pricing-snapshot-wealth.md`(환율·시세 내부배치 라우터X·환율→시세 09:00→09:10 순서의존·wealth 자산배분 추이=박제 소비처). 둘 다 신규 7섹션 틀. **06·07 모두 미검수 상태로 묶어 커밋**(사용자가 검수 생략 선택). 07 작성 중 file:line 전수 대조 완료. plan 대비 정정: 수동자산 전용계좌 4종(SAVINGS_ASSET 추가)·현재배분 cash 직접 vs 추이 balance−종목평가 역산.
 
 **★ 형식 전환 (2026-06-19)**: 사용자 요구 "소스를 더 딥하게 — API 단위 추적"으로 **도메인 7섹션 틀 개편**. §4 "공통 메커니즘"(여러 API 공유 로직 1번 깊게) + §5 "엔드포인트별 풀 트레이스"(API마다 요청→의존성·검증→서비스→repo쿼리→응답조립→commit, file:line). 공통은 §5에서 `→ §4-x` 참조해 반복 제거. 02(API 16개)·03(API 6개) 이 틀로 **재작업 완료**, 사용자 03 형식 검수 통과. README 공통구성도 신규 틀로 갱신. 계획파일: `~/.claude/plans/drifting-crafting-anchor.md` (이전: `spicy-herding-zebra.md`).
 
@@ -24,6 +25,6 @@
 
 ## Next Step
 
-1. **배치4** — `06-portfolio-trading.md` (최대 도메인 2216줄: 주식 매매 BUY/SELL · PortfolioItem 보유종목 · PortfolioValueHistory 종목 평가액 박제 · 03 §4-2 INVESTMENT 잔액공식=현금+보유평가액 완결) + `07-pricing-snapshot-wealth.md` (market_price·exchange_rate 시세/환율 내부배치 · wealth 자산배분추이). 신규 7섹션 틀.
-2. 배치5 — `08-home-stats-settings.md`.
-3. (완결된 약속) 03 "거래합" → 04 §4-2 / 03 §4-5 "박제 과거" → 05 §4-2 / 04 §4-1 "FIXED_EXPENSE·종목 평가액 박제" → 05 §4-1·§4-2(종목은 06으로 다시 미룸).
+1. **배치5 (마지막)** — `08-home-stats-settings.md`. home(대시보드 집계·여러 도메인 한 화면), stats(기간/카테고리 통계), settings(사용자·가계부 환경설정). 06·07이 만든 투자·자산 데이터가 홈에서 어떻게 소비되는지로 시리즈 마무리. 신규 7섹션 틀.
+2. (선택) 06·07 사후 검수 — 미검수 상태로 커밋했으니 필요 시 스폿 체크.
+3. (완결된 약속) 03 "거래합" → 04 §4-2 / 03 §4-5 "박제 과거" → 05 §4-2 / 04 §4-1 "종목 평가액 박제" → 06 §4-5 / 06 "환율·시세 환산" → 07 §4-1·§4-2 / 05·06 박제 소비처 → 07 §5-C wealth.
