@@ -63,8 +63,8 @@ async def get_account_overview(
 async def get_account_realized_pnl(
     account_id: UUID,
     household: CurrentHousehold,
-    from_date: date | None = Query(None),
-    to_date: date | None = Query(None),
+    from_date: date | None = Query(None, alias="fromDate"),
+    to_date: date | None = Query(None, alias="toDate"),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[RealizedPnlResponse]:
     """계좌 누적 매매손익 — 기간 내 계좌 전체 매도 건별 실현손익 + 요약. 기본 최근 12개월.
@@ -122,8 +122,8 @@ async def list_item_transactions(
 async def get_item_realized_pnl(
     item_id: UUID,
     household: CurrentHousehold,
-    from_date: date | None = Query(None),
-    to_date: date | None = Query(None),
+    from_date: date | None = Query(None, alias="fromDate"),
+    to_date: date | None = Query(None, alias="toDate"),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[RealizedPnlResponse]:
     """종목 매매손익 — 기간 내 매도 건별 실현손익 + 요약. 기본 최근 12개월."""

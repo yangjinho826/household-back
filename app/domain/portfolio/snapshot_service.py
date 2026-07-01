@@ -18,7 +18,7 @@ from app.domain.account.repository import AccountRepository
 from app.domain.household.model import Household
 from app.domain.portfolio.model import PortfolioValueHistory
 from app.domain.portfolio.repository import (
-    PortfolioItemRepository,
+    PortfolioTransactionRepository,
     PortfolioValueHistoryRepository,
 )
 
@@ -29,16 +29,20 @@ async def snapshot_household_portfolio(
     db: AsyncSession,
     household: Household,
     snapshot_date: date,
+    as_of: date,
     *,
     replace: bool = False,
 ) -> list[PortfolioValueHistory]:
-    """가계부의 모든 INVESTMENT 통장 종목들을 그 시점 상태로 박제.
+    """가계부의 모든 INVESTMENT 통장 종목을 as_of(그 달 말일) 시점 보유로 박제.
 
+    현재 보유가 아니라 as_of 까지의 거래로 재구성한 보유수량을 원가로 평가한다
+    (과거 시가 이력이 없어 원가 기준). 이렇게 해야 as_of 현금과 짝이 맞아
+    account_snapshots.balance = cash + Σvaluation 의 이중계상이 사라진다.
     replace=True 면 그달 기존 박제를 먼저 지우고 다시 만듦 (upsert).
     호출처: account_snapshot/service.py 의 _build_and_save_snapshot
     """
     account_repo = AccountRepository(db)
-    item_repo = PortfolioItemRepository(db)
+    tx_repo = PortfolioTransactionRepository(db)
     history_repo = PortfolioValueHistoryRepository(db)
 
     if replace:
@@ -52,28 +56,27 @@ async def snapshot_household_portfolio(
 
     histories: list[PortfolioValueHistory] = []
     for a in investment_accounts:
-        items = await item_repo.find_active_by_account_id(a.id)
-        for i in items:
-            cost = i.quantity * i.avg_price
-            valuation = i.quantity * i.current_price
+        holdings = await tx_repo.asof_holdings_by_account(a.id, as_of)
+        for h in holdings:
+            # 과거 시가 없음 → 원가 기준: current_price=avg_cost, valuation=cost
             histories.append(
                 PortfolioValueHistory(
                     household_id=household.id,
                     account_id=a.id,
-                    portfolio_item_id=i.id,
+                    portfolio_item_id=h["item_id"],
                     snapshot_date=snapshot_date,
-                    quantity=i.quantity,
-                    avg_price=i.avg_price,
-                    current_price=i.current_price,
-                    cost=cost,
-                    valuation=valuation,
+                    quantity=h["quantity"],
+                    avg_price=h["avg_cost"],
+                    current_price=h["avg_cost"],
+                    cost=h["cost"],
+                    valuation=h["cost"],
                     data_stat_cd=DataStatus.ACTIVE,
                 )
             )
 
     await history_repo.save_all(histories)
     logger.info(
-        "종목 박제 완료 (household_id=%s, date=%s, items=%d)",
-        household.id, snapshot_date, len(histories),
+        "종목 박제 완료 (household_id=%s, date=%s, as_of=%s, items=%d)",
+        household.id, snapshot_date, as_of, len(histories),
     )
     return histories

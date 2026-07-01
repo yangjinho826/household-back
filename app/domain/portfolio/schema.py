@@ -199,10 +199,17 @@ class RealizedPnlSummary(CamelBaseModel):
 
 
 class RealizedPnlResponse(CamelBaseModel):
-    """종목 매매손익 응답 — 요약 + 매도 건별"""
+    """종목 매매손익 응답 — 요약 + 매도 건별.
+
+    effective_from/to 는 실제 적용된 조회 기간. from 미지정 시 백엔드가
+    '최근 1년 ↔ 첫 매도일' 중 더 이른 쪽으로 확장하므로, 프론트가 이 값으로
+    날짜 입력을 채운다(기본 범위가 첫 매도를 놓치지 않게).
+    """
 
     summary: RealizedPnlSummary
     rows: list[RealizedPnlRow]
+    effective_from: date
+    effective_to: date
 
 
 class PortfolioValueHistoryPoint(CamelBaseModel):

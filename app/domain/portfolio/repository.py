@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
@@ -263,8 +263,19 @@ class PortfolioTransactionRepository:
         )
         return list(result.scalars().all())
 
-    async def sum_for_account(self, account_id: UUID) -> dict[str, Decimal]:
-        """통장별 BUY/SELL 합산 — 단가 * 수량 (_calc_balance 용)"""
+    async def sum_for_account(
+        self, account_id: UUID, to_date: date | None = None,
+    ) -> dict[str, Decimal]:
+        """통장별 BUY/SELL 합산 — 단가 * 수량 (_calc_balance 용).
+
+        to_date 를 주면 그 날짜까지의 누적(스냅샷 as-of 잔액용). 없으면 전체.
+        """
+        conds = [
+            PortfolioTransaction.account_id == account_id,
+            PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+        ]
+        if to_date is not None:
+            conds.append(PortfolioTransaction.tx_date <= to_date)
         result = await self.db.execute(
             select(
                 PortfolioTransaction.pt_type,
@@ -272,12 +283,7 @@ class PortfolioTransactionRepository:
                     func.sum(PortfolioTransaction.quantity * PortfolioTransaction.price), 0
                 ).label("total"),
             )
-            .where(
-                and_(
-                    PortfolioTransaction.account_id == account_id,
-                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
-                )
-            )
+            .where(and_(*conds))
             .group_by(PortfolioTransaction.pt_type)
         )
         sums = {"buy": Decimal("0"), "sell": Decimal("0")}
@@ -390,6 +396,111 @@ class PortfolioTransactionRepository:
             )
         )
         return list(result.scalars().all())
+
+    async def earliest_sell_date_by_account(
+        self, account_id: UUID, household_id: UUID,
+    ) -> date | None:
+        """계좌의 가장 이른 매도일 — 매매손익 기본 조회기간 clamp 용.
+
+        매도가 없으면 None. 기본 '최근 1년' 이 첫 매도를 놓치지 않게,
+        from 미지정 시 이 날짜까지 범위를 확장한다.
+        """
+        result = await self.db.execute(
+            select(func.min(PortfolioTransaction.tx_date)).where(
+                and_(
+                    PortfolioTransaction.account_id == account_id,
+                    PortfolioTransaction.household_id == household_id,
+                    PortfolioTransaction.pt_type == PortfolioTxType.SELL,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def earliest_sell_date_by_item(self, item_id: UUID) -> date | None:
+        """종목의 가장 이른 매도일 — 매매손익 기본 조회기간 clamp 용. 없으면 None."""
+        result = await self.db.execute(
+            select(func.min(PortfolioTransaction.tx_date)).where(
+                and_(
+                    PortfolioTransaction.portfolio_item_id == item_id,
+                    PortfolioTransaction.pt_type == PortfolioTxType.SELL,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def asof_holdings_by_account(
+        self, account_id: UUID, as_of: date,
+    ) -> list[dict]:
+        """as_of(그 달 말일) 시점 보유 종목 재구성 — 스냅샷 시점 평가용.
+
+        종목별로 as_of 까지의 BUY-SELL 순수량과 매수 평단(원가)을 집계한다.
+        과거 시가 이력이 없어 평가액은 원가(수량×평단) 기준. 순수량 0 이하(전량매도)는 제외.
+        반환: [{item_id, name, code, market, quantity, avg_cost, cost}] (cost = 수량×평단).
+        """
+        qty_signed = func.sum(
+            case(
+                (PortfolioTransaction.pt_type == PortfolioTxType.BUY,
+                 PortfolioTransaction.quantity),
+                (PortfolioTransaction.pt_type == PortfolioTxType.SELL,
+                 -PortfolioTransaction.quantity),
+                else_=0,
+            )
+        )
+        buy_qty = func.sum(
+            case(
+                (PortfolioTransaction.pt_type == PortfolioTxType.BUY,
+                 PortfolioTransaction.quantity),
+                else_=0,
+            )
+        )
+        buy_amt = func.sum(
+            case(
+                (PortfolioTransaction.pt_type == PortfolioTxType.BUY,
+                 PortfolioTransaction.quantity * PortfolioTransaction.price),
+                else_=0,
+            )
+        )
+        result = await self.db.execute(
+            select(
+                PortfolioTransaction.portfolio_item_id.label("item_id"),
+                func.max(PortfolioTransaction.name).label("name"),
+                func.max(PortfolioTransaction.code).label("code"),
+                func.max(PortfolioTransaction.market).label("market"),
+                qty_signed.label("qty"),
+                buy_qty.label("buy_qty"),
+                buy_amt.label("buy_amt"),
+            )
+            .where(
+                and_(
+                    PortfolioTransaction.account_id == account_id,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                    PortfolioTransaction.tx_date <= as_of,
+                    PortfolioTransaction.portfolio_item_id.isnot(None),
+                )
+            )
+            .group_by(PortfolioTransaction.portfolio_item_id)
+        )
+
+        holdings: list[dict] = []
+        for row in result.all():
+            qty = Decimal(row.qty or 0)
+            if qty <= 0:
+                continue  # 전량매도 — 그 시점 보유 아님
+            bq = Decimal(row.buy_qty or 0)
+            ba = Decimal(row.buy_amt or 0)
+            avg_cost = (ba / bq) if bq > 0 else Decimal("0")
+            holdings.append({
+                "item_id": row.item_id,
+                "name": row.name,
+                "code": row.code,
+                "market": row.market,
+                "quantity": qty,
+                "avg_cost": avg_cost.quantize(Decimal("0.01")),
+                "cost": (qty * avg_cost).quantize(Decimal("0.01")),
+            })
+        return holdings
 
     @staticmethod
     def _cursor_after(cursor: str | None):
