@@ -1,4 +1,5 @@
 import logging
+from calendar import monthrange
 from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -154,6 +155,11 @@ def _shift_months(d: date, delta_months: int) -> date:
     return date(y, m + 1, 1)
 
 
+def _month_end(d: date) -> date:
+    """그 달 마지막 날짜 — 시점 잔액 박제의 as-of 기준."""
+    return date(d.year, d.month, monthrange(d.year, d.month)[1])
+
+
 def _build_month(
     snapshot_date: date,
     snapshots: list[AccountSnapshot],
@@ -208,6 +214,7 @@ async def _build_and_save_snapshot(
             household.id, target_date,
         )
 
+    as_of = _month_end(target_date)  # 그 달 말일 시점 잔액으로 박제
     accounts = [
         a for a in await AccountRepository(db).find_active_by_household_id(household.id)
         if not a.is_archived
@@ -216,14 +223,14 @@ async def _build_and_save_snapshot(
         # 계좌 없는 가계부 — 박제할 게 없음. replace 면 종목 박제도 정리.
         if replace:
             await snapshot_household_portfolio(
-                db, household, target_date, replace=True,
+                db, household, target_date, as_of, replace=True,
             )
         return _build_month(target_date, [], {})
 
     tx_repo = TransactionRepository(db)
     snapshots: list[AccountSnapshot] = []
     for a in accounts:
-        summary = await _calc_balance(tx_repo, a, db)
+        summary = await _calc_balance(tx_repo, a, db, as_of=as_of)
         monthly = await tx_repo.sum_by_account_for_month(
             a.id, target_date.year, target_date.month,
         )
@@ -242,7 +249,7 @@ async def _build_and_save_snapshot(
     await AccountSnapshotRepository(db).save_all(snapshots)
 
     # 종목 박제 — portfolio 도메인이 자기 책임 (replace 면 그달 것 갈아끼움)
-    await snapshot_household_portfolio(db, household, target_date, replace=replace)
+    await snapshot_household_portfolio(db, household, target_date, as_of, replace=replace)
 
     account_map = {a.id: a for a in accounts}
     return _build_month(target_date, snapshots, account_map)
