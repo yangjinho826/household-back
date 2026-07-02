@@ -11,3 +11,5 @@
 2026-06-04: 수동자산 모델 — 통장(account) 일원화 + 평가조정(VALUATION) 거래 (ManualAsset+전용계좌 이원화의 '평가액+이체' 단순합산이 평가액 재입력 시 이체분 이중계상. 모든 자산을 account로 통일, 가치변동은 VALUATION 거래로. 잔액=start_balance+거래합. 대안 '성격별 분리'·'이체를 평가액에 흡수'는 복잡도/모호성으로 탈락)
 2026-06-04: 평가조정 부호 표현 — valuation_direction 컬럼(INCREASE/DECREASE) (amount는 양수 유지. signed amount는 amount>0 불변량 깨고, UP/DOWN 2타입은 '평가조정' 개념 분할. 방향 플래그가 이체 패턴과 일관)
 2026-06-04: 평가액 입력 UX — 현재 총액 절대값 입력 → 차액 자동 VALUATION (사용자는 '지금 얼마'만 입력, 시스템이 (새값-현재잔액) 차액을 평가조정 거래로 생성. 이체는 기존 그대로 별도)
+2026-07-02: 자산 추이 원가박제 해결 — market_price_history 시세이력 + 종목별 출처 분기 (A안 정공법. 박제 시 원가 대신 그 달 시가로 평가 → 손실이 자산추이에 반영. 야후 종목(KRX/US)은 월봉 `interval=1mo`로 미래수집+과거backfill, 금 등 OTHER는 박제시점 current_price를 그 달로 저장('현재부터', 과거 소급X). 시가 없으면 원가 fallback이라 회귀 없음. B안(current_price 직박제)은 catch-up 왜곡으로 탈락)
+2026-07-02: 박제 시가조회 키 — tx기반(asof_holdings) 아니라 item 현재 (code,market) (실데이터에서 종목 market 변경 이력 발견: tx=KRX_KOSPI인데 item=OTHER로 바뀐 금 종목. asof_holdings는 tx.code/market이라 시세이력(item 기준 저장)과 어긋나 원가 fallback로 샘. value_holdings_at_month가 item_id로 현재 code/market 교정해 정합)

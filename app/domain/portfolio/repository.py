@@ -184,6 +184,29 @@ class PortfolioItemRepository:
         )
         return [(code, Market(market)) for code, market in result.all()]
 
+    async def find_active_other_prices(
+        self, household_id: UUID | None = None,
+    ) -> list[dict]:
+        """OTHER 시장(금 등) 활성 종목의 (code, current_price) — 시세이력 박제용.
+
+        야후 미지원이라 backfill 불가 → 박제 시점 수동가를 그 달 시세로 남기는 데 쓴다.
+        같은 code 가 여러 종목이면 각각 반환(호출부 upsert 라 마지막이 이김 — 보통 유일).
+        household_id 주면 그 가계부만, 없으면 전체(시장 공통 수집).
+        """
+        conds = [
+            PortfolioItem.market == Market.OTHER.value,
+            PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
+            PortfolioItem.is_archived.is_(False),
+        ]
+        if household_id is not None:
+            conds.append(PortfolioItem.household_id == household_id)
+        result = await self.db.execute(
+            select(PortfolioItem.code, PortfolioItem.current_price).where(and_(*conds))
+        )
+        return [
+            {"code": code, "current_price": price} for code, price in result.all()
+        ]
+
     async def bulk_update_current_price_by_code_market(
         self, prices: dict[tuple[str, Market], Decimal],
     ) -> int:

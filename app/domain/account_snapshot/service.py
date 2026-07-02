@@ -19,6 +19,7 @@ from app.domain.account_snapshot.schema import (
 )
 from app.domain.household.model import Household
 from app.domain.household.repository import HouseholdRepository
+from app.domain.market_price import service as market_price_service
 from app.domain.portfolio.snapshot_service import snapshot_household_portfolio
 from app.domain.transaction.repository import TransactionRepository
 
@@ -43,6 +44,11 @@ async def create_monthly_snapshots_for_all(db: AsyncSession) -> int:
     target_date = _target_month()  # 박제 기준 = 지난달
     months = [_shift_months(target_date, -i) for i in range(SNAPSHOT_CATCHUP_MONTHS)]
     upsert_months = {target_date, _shift_months(target_date, -1)}  # 최근 2개월
+
+    # 박제 전 시세 확보 (시장 공통 — 전 가계부 1회). 야후 종목은 과거 월봉까지 채워
+    # catch-up 달도 시가 평가되고, OTHER(금 등)는 지난달에 현재가를 박는다('현재부터').
+    await market_price_service.backfill_yahoo_monthly(db, range_="2y")
+    await market_price_service.snapshot_other_prices(db, target_date)
 
     repo = AccountSnapshotRepository(db)
     households = await HouseholdRepository(db).find_all_active()
@@ -79,6 +85,9 @@ async def create_target_month_snapshot(
     """
     repo = AccountSnapshotRepository(db)
     target_date = _target_month()
+    # 수동 박제도 시가 반영 — 그 가계부 종목 시세 먼저 확보.
+    await market_price_service.backfill_yahoo_monthly(db, household.id, range_="2y")
+    await market_price_service.snapshot_other_prices(db, target_date, household.id)
     exists = await repo.has_active_for_month(household.id, target_date)
     result = await _build_and_save_snapshot(db, household, target_date, replace=exists)
     logger.info(

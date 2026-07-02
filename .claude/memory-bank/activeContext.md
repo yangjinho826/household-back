@@ -2,50 +2,33 @@
 
 ## Goal
 
-**평가금 수정 UX를 거래 화면으로 이동 + 모바일 삭제버튼 수정 + 도커 DB 포트** (2026-06-04, 자산통합 후속).
+**자산 추이 차트 원가박제 해결 — 시세 이력(market_price_history) 시가 박제** (2026-07-02).
+투자계좌 손실(KRX금계좌 -4.42% 등)이 "자산 추이" 그래프에 안 뜨고 원가로 평평하게 박제되던 문제. 박제 시 그 달 시가로 평가하도록 전환.
 
 ## Status
 
-**3건 전부 완료. 미커밋 — 커밋 대기.** (`npm run build`/tsc/eslint 통과)
+**백엔드 구현·검증 완료. 미커밋.** (브랜치 `feat/asset-trend-market-price`)
 
-- **#1 모바일 삭제버튼**: `form-sheet.tsx` Drawer가 BottomTab(z-index 500, 64px) 높이 보정 누락 → 삭제버튼이 탭바 밑에 깔려 클릭 차단. `household-switcher.tsx`의 보정 공식(`maxHeight: min(90dvh, 100dvh - bottom-tab-h - safe-bottom)` / `paddingBottom: bottom-tab-h + safe-bottom + 16`) 적용.
-- **#2 평가금→거래**: 거래 폼 맨 위 **통장 칩 리스트**(전체 계좌) + 선택 타입 분기. 수동자산→평가조정(새 평가액 절대값 입력, diff를 VALUATION 거래로 생성), 일반→기존 폼. `use-form.tsx`에 accounts param·txType 동기화 effect·VALUATION submit 분기 추가. **자산 폼(asset-form/use-asset-form)은 초기금(startBalance) 직접수정으로 복귀** — 자동 VALUATION 생성 제거. 백엔드 무변경(VALUATION 거래·form-options 전체계좌·account update startBalance 이미 완비).
-- **#3 도커 포트**: base compose 불변, git-ignore된 `docker-compose.override.yml`로 `127.0.0.1:5432` localhost 한정 노출. `.gitignore`에 override 추가.
-- **#2 후속 UX**: 거래 폼 통장 칩을 **가로 스크롤 한 줄**(통장 많을 때 대비).
-- **#2 후속2 — 거래 필터 전체 통장**: 거래 탭 계좌 필터에 **전체 통장 노출**(적금/수동자산/투자 다 보임, 이동 X 탭 안 필터). 백엔드 `list_account_ledger` **타입 가드 제거**(전 타입 허용) + `_ledger_start_balance`에 `sums["valuation_net"]` 추가 → 수동자산 평가조정 running balance 정확. `_LEDGER_ACCOUNT_TYPES` 상수 삭제(+AccountType import 정리). INVESTMENT은 매매현금이 거래 테이블 밖이라 잔액 부정확 → 프론트에서 `showBalance=false`로 **잔액 컬럼만 숨김**(거래는 표시). plumbing: transactions-section→AccountLedgerView→LedgerRow. LedgerRow에 VALUATION "평가조정" 보조라벨. **백엔드 변경 → 서버 재기동 필요.**
+- 신규: `market_price/model.py`(MarketPriceHistory), `repository.py`(upsert/find_prices_for_month), 마이그레이션 `a7c3e9d1f4b8`(테이블 code/market/price_date/price + unique + index)
+- `yahoo_client.py`: `fetch_monthly_closes`(interval=1mo 월봉) 추가, HTTP+retry를 `_request_chart`로 공용화
+- `market_price/service.py`: `backfill_yahoo_monthly`(야후 월봉→upsert, USD환산), `snapshot_other_prices`(OTHER current_price→그 달), `value_holdings_at_month`(item 현재 code/market 기준 시가평가, 없으면 원가 fallback)
+- 박제 로직: `account/service.py:_calc_investment_balance` as_of 분기 + `portfolio/snapshot_service.py` → `value_holdings_at_month` 호출
+- 스케줄러: `account_snapshot/service.py` 자동/수동 박제 직전 시세 확보(backfill + OTHER 저장) 연결
+- DB 정리: 사라진 이전 세션 마이그(675b4925ec18)이 dev DB `alembic_version`에 남아 체인 깨짐 → version을 c8e1f4a7d2b9로 직접 UPDATE + 기존 테이블 drop 후 재적용
 
-이전 마일스톤(자산통합):
-**백엔드 자산통합 + 프론트(C) 전부 완료. 커밋됨(77bb340까지).**
-
-C(프론트) 완료 (2026-06-04):
-- 백엔드 단계1: `account/enum.py` `MANUAL_ASSET_DEFAULT_META` + `create_account` 기본 color/icon 부여 (QA verified: REAL_ESTATE → #8B5CF6/building-estate)
-- transaction 프론트 VALUATION 지원: `TxType`+`ValuationDirection`+`valuationDirection`, 거래폼 직접선택 제외, tx-row/ledger-row 방향별 부호·색
-- account feature 통합: `asset-form.tsx`+`use-asset-form.tsx` 신규 (추가=account생성 / 평가액수정=차액 VALUATION / 이름·타입=update / 삭제)
-- manual-asset feature 7파일 삭제 + queries.ts 정리. wealth-section `accounts.filter(isManualAsset)`로 전환
-- 날짜 mantine v8 string화: transaction/trade/household form
-- i18n: account.asset.*, COMMODITY·VALUATION 라벨, manual-asset 제거
-- 검증: 백 pytest 4 green · 프론트 typecheck/lint 통과 · curl 골든패스(생성·증액·감액·지출차단·삭제) 전부 통과
-
-이전 Status (백엔드 단계):
-**백엔드 자산통합(1~6) 완료 + 커밋(`38737b0`, 테스트 제외).**
-
-커밋됨:
-- 프론트 버그3 (main): `8bbb370` 누적매매수익 날짜(mantine v8 string화), `7173a6e` 거래 후 계좌 캐시(transaction mutation에 portfolio invalidate 누락 추가), `140397f` 도넛 외/현금 pinToEnd 맨뒤 정렬
-- 백엔드 (main): `38737b0` VALUATION 거래타입+valuation_direction 컬럼, 잔액 공식 통일, manual_asset 도메인 제거, 평가액→start_balance 흡수 마이그(e5f9a1c3d7b2, f1b3d5a7c9e2)
-
-검증: dev DB(postgres-dev) `alembic upgrade head` 적용 완료(head=f1b3d5a7c9e2). pytest 4 green(단, `tests/`+`pyproject.toml` pytest설정은 미커밋 — 테스트 제외 지시).
+**스모크 검증 (dev DB, KRX금계좌 금 26주):** 시세없음→원가(5,363,592, pl 0) / 시세 15만저장→시가(3,900,000, pl -1,463,592) / 다른달→원가fallback / upsert 멱등. 전부 통과(rollback).
 
 ## Context
 
-- **C(프론트) 핵심 복잡성**: account create가 수동자산 type 생성 시 color/icon/이름 기본부여를 떠안아야 함. 기존 `manual_asset._ROLLUP_ACCOUNT_META` 값: REAL_ESTATE=`#8B5CF6`/`building-estate`, PENSION=`#EC4899`/`pig-money`, COMMODITY=`#F59E0B`/`coin`, SAVINGS_ASSET=`#10B981`/`wallet`. → 백엔드 account 도메인 보강 필요.
-- 프론트 `_features/manual-asset/` (api/queries/components/form/hooks/types) + 사용처(wealth-section, transaction/form, account/types, _constants/queries, ko·en messages) 13+파일 → account 생성 + 평가조정 거래로 재구성.
-- **평가액 수정 UX**: "현재 총 평가액" 절대값 입력 → (새값 − 현재잔액) 차액을 VALUATION 거래로 자동 생성. 이체는 기존 그대로 별도.
-- VALUATION API: `POST /transactions` `{tx_type:"VALUATION", amount(양수), valuationDirection:"INCREASE"|"DECREASE", accountId(수동자산 통장)}`. 수동자산 통장에만 허용.
-- trade-form/transaction form/household form 날짜도 mantine v8 버그(`value={dayjs(x).toDate()}` Date 전달) — C에서 같이 string 규격화.
-- 잔액 공식(백엔드): 전 분류 `start_balance + 거래합`. `_cash_flow`에 `valuation_net` 포함. `_calc_balance`/`_build_balance` 동일성 유지(test_account_balance.py).
+- **자산 추이 = account_snapshots.balance**(월별 박제). 기존엔 `_calc_investment_balance(as_of)`가 과거 시가 없어 원가로 평가 → 손익 0. 이제 시가.
+- **종목별 시세 출처 분기**: 야후 종목(KRX/US)은 월봉 backfill 가능, 금 등 `Market.OTHER`는 야후 미지원이라 박제 시점 current_price를 그 달로 저장(과거 소급 X = "현재부터").
+- **실데이터 함정**: 금 종목이 tx엔 market=KRX_KOSPI, item엔 OTHER. `asof_holdings`(tx기반)와 시세이력(item기준 저장)이 어긋남 → `value_holdings_at_month`가 item_id로 현재 code/market 교정해 해결.
+- **회귀 안전**: 시세 이력 없으면 원가 fallback → 금 과거·수집실패 종목은 기존과 동일.
+- tests/ 인프라 없음(과거 관행상 미커밋) + upsert가 postgres on_conflict 전용이라, pytest 대신 dev DB 스모크로 검증.
 
 ## Next Step
 
-1. **커밋** — 백엔드(account 기본 메타) + 프론트(자산통합 C) 분리 커밋. 백엔드 `tests/`+`pyproject` pytest설정 커밋 여부 결정.
-2. dev→main 머지 검토 (R5a 사이클 + 자산통합 전부 완료).
-3. (선택) 브라우저 E2E — 자산 추가/평가액 수정 폼 실제 렌더 (Windows headless 빌드 필요 시).
+1. **실제 박제로 end-to-end 확인** (선택) — dev에서 수동 박제(POST /account-snapshot/create) 돌려 /wealth·/account-snapshot/yearly 응답에 금 손실 반영 확인.
+2. **커밋** — feat 브랜치. 마이그+model+repo+service+박제로직 묶음. (tests 미포함 관행)
+3. **프론트** — 자산 추이 YAxis(손익 음수 표시) 대응은 프론트 별도 작업.
+4. 과거 backfill 1회 실행 여부 결정(야후 종목만, 실 데이터에 금밖에 없으면 불필요).
