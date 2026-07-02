@@ -26,6 +26,7 @@ from app.domain.account.schema import (
 )
 from app.domain.account_snapshot.repository import AccountSnapshotRepository
 from app.domain.household.model import Household
+from app.domain.market_price import service as market_price_service
 from app.domain.portfolio.repository import (
     PortfolioItemRepository,
     PortfolioTransactionRepository,
@@ -335,13 +336,18 @@ async def _calc_investment_balance(
     cash = cash - pt_sums["buy"] + pt_sums["sell"]
 
     if as_of is not None:
-        # 시점 박제 — 그 시점 보유수량을 원가로 평가(과거 시가 이력 없음).
-        # cash 와 원가가 짝이 맞아 이중계상 없음. profit_loss 는 원가=평가라 0.
+        # 시점 박제 — 그 시점 보유수량을 '그 달 시가'(market_price_history)로 평가.
+        # 시가 이력 없는 종목(금 과거·수집 실패 등)은 원가 fallback → 회귀 없음.
         holdings = await pt_repo.asof_holdings_by_account(account.id, as_of)
+        valued = await market_price_service.value_holdings_at_month(
+            db, holdings, as_of.replace(day=1),
+        )
         cost = sum((h["cost"] for h in holdings), Decimal("0.00"))
-        valuation = cost
-        profit_loss = Decimal("0.00")
-        rate = Decimal("0.00")
+        valuation = sum(
+            (valued[h["item_id"]]["valuation"] for h in holdings), Decimal("0.00"),
+        )
+        profit_loss = valuation - cost
+        rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0.00")
     else:
         items = await PortfolioItemRepository(db).find_active_by_account_id(account.id)
         cost, valuation, profit_loss, rate = _summarize_holdings(items)

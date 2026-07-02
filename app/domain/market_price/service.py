@@ -10,6 +10,7 @@ import asyncio
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
@@ -17,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.exchange_rate.enum import CurrencyCode
 from app.domain.exchange_rate.repository import CurrencyRateRepository
-from app.domain.market_price.yahoo_client import fetch_chart_quote
+from app.domain.market_price.repository import MarketPriceHistoryRepository
+from app.domain.market_price.yahoo_client import fetch_chart_quote, fetch_monthly_closes
 from app.domain.portfolio.enum import Market
 from app.domain.portfolio.repository import PortfolioItemRepository
 from app.domain.portfolio.yahoo import build_yahoo_symbol
@@ -137,3 +139,138 @@ async def _fetch_one(
     if market in _USD_MARKETS and fx_rate is not None:
         price = price * fx_rate
     return price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+# =========================================================
+# 월별 시세 이력(market_price_history) 수집 — 자산 스냅샷 시가 박제용
+# =========================================================
+
+# backfill 대상 야후 시장 — OTHER(야후 미지원) 제외.
+_YAHOO_MARKETS = [
+    Market.KRX_KOSPI,
+    Market.KRX_KOSDAQ,
+    Market.NASDAQ,
+    Market.NYSE,
+]
+
+
+async def _resolve_usd_krw(session: AsyncSession) -> Decimal | None:
+    latest = await CurrencyRateRepository(session).find_by_pair(
+        CurrencyCode.USD, CurrencyCode.KRW,
+    )
+    return latest.rate if latest else None
+
+
+async def backfill_yahoo_monthly(
+    session: AsyncSession,
+    household_id: UUID | None = None,
+    range_: str = "2y",
+) -> int:
+    """야후 종목 월봉 종가를 market_price_history 에 채운다(미래 수집 + 과거 backfill 공용).
+
+    종목당 1회 호출로 range_ 기간 월별 종가를 upsert. USD 시장은 '현재' 환율로 KRW 환산
+    (과거 환율 이력이 없어 근사 — 원가박제보다는 정확). 환율 없으면 USD 시장 제외.
+    household_id 없으면 전 가계부(시세는 시장 공통). 반환: upsert 시도한 (종목×월) row 수.
+    """
+    repo = PortfolioItemRepository(session)
+    markets = list(_YAHOO_MARKETS)
+
+    fx_rate = await _resolve_usd_krw(session)
+    if fx_rate is None:
+        markets = [m for m in markets if m not in _USD_MARKETS]
+    if not markets:
+        return 0
+
+    if household_id is None:
+        pairs = await repo.find_active_distinct_code_market_by_markets(markets)
+    else:
+        pairs = await repo.find_active_distinct_code_market_by_household_and_markets(
+            household_id, markets,
+        )
+    if not pairs:
+        return 0
+
+    rows: list[dict] = []
+    for code, market in pairs:
+        symbol = build_yahoo_symbol(market, code)
+        closes = await fetch_monthly_closes(symbol, range_)
+        if not closes:
+            continue
+        use_fx = market in _USD_MARKETS and fx_rate is not None
+        for month, close in closes.items():
+            price = close * fx_rate if use_fx else close
+            rows.append({
+                "code": code,
+                "market": market.value,
+                "price_date": month,
+                "price": price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            })
+
+    upserted = await MarketPriceHistoryRepository(session).upsert_prices(rows)
+    logger.info(
+        "월봉 시세 backfill (household=%s, pairs=%d, rows=%d)",
+        household_id, len(pairs), len(rows),
+    )
+    return upserted
+
+
+async def snapshot_other_prices(
+    session: AsyncSession, month: date, household_id: UUID | None = None,
+) -> int:
+    """OTHER(금 등) 종목의 현재 current_price 를 그 달 시세로 박는다.
+
+    야후 미지원이라 과거 소급 불가 — 박제 시점 수동가를 '그 달' 값으로 저장('현재부터').
+    반환: upsert 시도 row 수.
+    """
+    others = await PortfolioItemRepository(session).find_active_other_prices(household_id)
+    if not others:
+        return 0
+    rows = [
+        {
+            "code": o["code"],
+            "market": Market.OTHER.value,
+            "price_date": month,
+            "price": o["current_price"],
+        }
+        for o in others
+    ]
+    return await MarketPriceHistoryRepository(session).upsert_prices(rows)
+
+
+async def value_holdings_at_month(
+    session: AsyncSession, holdings: list[dict], month: date,
+) -> dict:
+    """asof holdings 를 그 달 시가(market_price_history)로 평가 — 스냅샷 박제 공용.
+
+    종목 식별을 tx 기반(holdings의 code/market)이 아니라 item 현재 (code,market)로 한다:
+    매수 후 종목 market 을 바꾼 경우(예: KRX→OTHER) tx 와 시세 이력이 어긋나므로,
+    시세를 '저장한 기준'(item 현재값)과 맞춰야 정합한다. 시가 없으면 원가 fallback.
+    반환: {item_id: {"current_price", "valuation"}}.
+    """
+    if not holdings:
+        return {}
+
+    item_ids = [h["item_id"] for h in holdings]
+    items = await PortfolioItemRepository(session).find_by_ids_including_deleted(item_ids)
+    item_map = {i.id: i for i in items}
+
+    def _key(h: dict) -> tuple[str, str]:
+        it = item_map.get(h["item_id"])
+        return (it.code, it.market) if it else (h["code"], h["market"])
+
+    prices = await MarketPriceHistoryRepository(session).find_prices_for_month(
+        list({_key(h) for h in holdings}), month,
+    )
+
+    valued: dict = {}
+    for h in holdings:
+        px = prices.get(_key(h))
+        if px is not None:
+            valued[h["item_id"]] = {
+                "current_price": px, "valuation": h["quantity"] * px,
+            }
+        else:
+            valued[h["item_id"]] = {
+                "current_price": h["avg_cost"], "valuation": h["cost"],
+            }
+    return valued

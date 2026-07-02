@@ -19,6 +19,7 @@ from app.domain.category.model import Category  # noqa: F401
 from app.domain.exchange_rate.model import CurrencyRate  # noqa: F401
 from app.domain.fixed.model import FixedExpense  # noqa: F401
 from app.domain.household.model import Household, HouseholdMember  # noqa: F401
+from app.domain.market_price.model import MarketPriceHistory  # noqa: F401
 from app.domain.portfolio.model import (  # noqa: F401
     PortfolioItem,
     PortfolioTransaction,

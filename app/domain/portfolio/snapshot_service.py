@@ -16,6 +16,7 @@ from app.core.enums.data_status import DataStatus
 from app.domain.account.enum import AccountType
 from app.domain.account.repository import AccountRepository
 from app.domain.household.model import Household
+from app.domain.market_price import service as market_price_service
 from app.domain.portfolio.model import PortfolioValueHistory
 from app.domain.portfolio.repository import (
     PortfolioTransactionRepository,
@@ -54,11 +55,23 @@ async def snapshot_household_portfolio(
         if a.account_type == AccountType.INVESTMENT and not a.is_archived
     ]
 
-    histories: list[PortfolioValueHistory] = []
+    # 계좌별 holdings 모아 전체를 그 달 시가로 평가 (item 현재 code/market 기준, N+1 방지).
+    # 시가 없으면 원가 fallback — value_holdings_at_month 가 처리.
+    per_account: list[tuple] = []
+    all_holdings: list[dict] = []
     for a in investment_accounts:
         holdings = await tx_repo.asof_holdings_by_account(a.id, as_of)
+        per_account.append((a, holdings))
+        all_holdings.extend(holdings)
+
+    valued = await market_price_service.value_holdings_at_month(
+        db, all_holdings, snapshot_date,
+    )
+
+    histories: list[PortfolioValueHistory] = []
+    for a, holdings in per_account:
         for h in holdings:
-            # 과거 시가 없음 → 원가 기준: current_price=avg_cost, valuation=cost
+            v = valued[h["item_id"]]
             histories.append(
                 PortfolioValueHistory(
                     household_id=household.id,
@@ -67,9 +80,9 @@ async def snapshot_household_portfolio(
                     snapshot_date=snapshot_date,
                     quantity=h["quantity"],
                     avg_price=h["avg_cost"],
-                    current_price=h["avg_cost"],
+                    current_price=v["current_price"],
                     cost=h["cost"],
-                    valuation=h["cost"],
+                    valuation=v["valuation"],
                     data_stat_cd=DataStatus.ACTIVE,
                 )
             )
