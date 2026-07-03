@@ -6,6 +6,8 @@
 
 ## Status
 
+**★ 전 배치 완료 (2026-07-03) — codewalk 시리즈 9개 문서 완결.** 배치5: `08-home-stats-settings.md` 작성 + README 진행현황/문서표 전체 갱신(04~08 링크·상태 ✅). 08 핵심: home·stats·settings **셋 다 테이블 없는 조회/집계 도메인**(07 wealth 부류) / GET 3개뿐 / home=위임집계(account·transaction·stats 서비스 순차호출, 재구현0) / stats 3단집계(sum_by_type=카드·sum_by_category=차트·ratio=같은kind내max대비 상대값) / 삭제카테고리 find_by_ids로 집계보존 / FIXED_EXPENSE→expense 합산 / settings=count×5. file:line 전수 대조 완료(main.py:70·71·73 라우터등록 확인). 08 미검수 상태(사용자 검수 여부 미정).
+
 **배치1·2·3·4 완료** — `docs/codewalk/`:
 - 배치1: `README.md` · `00-overview.md` · `01-core-infra.md`
 - 배치2: `02-auth-user-household.md` · `03-account.md`
@@ -25,6 +27,7 @@
 
 ## Next Step
 
-1. **배치5 (마지막)** — `08-home-stats-settings.md`. home(대시보드 집계·여러 도메인 한 화면), stats(기간/카테고리 통계), settings(사용자·가계부 환경설정). 06·07이 만든 투자·자산 데이터가 홈에서 어떻게 소비되는지로 시리즈 마무리. 신규 7섹션 틀.
-2. (선택) 06·07 사후 검수 — 미검수 상태로 커밋했으니 필요 시 스폿 체크.
+1. **커밋** — 배치5(`08-home-stats-settings.md` 신규 + `README.md` 갱신) 미커밋 상태. `docs:` 커밋 필요.
+2. (선택) 06·07·08 사후 검수 — 미검수 상태. 필요 시 스폿 체크.
+3. (완결) codewalk 시리즈 종료 — 후속 트랙은 `docs/testing/`(자매격) 또는 이직 포폴 정리.
 3. (완결된 약속) 03 "거래합" → 04 §4-2 / 03 §4-5 "박제 과거" → 05 §4-2 / 04 §4-1 "종목 평가액 박제" → 06 §4-5 / 06 "환율·시세 환산" → 07 §4-1·§4-2 / 05·06 박제 소비처 → 07 §5-C wealth.
