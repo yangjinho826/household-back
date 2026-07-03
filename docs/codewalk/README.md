@@ -25,13 +25,13 @@
 | **01** | [core 공통 토대](./01-core-infra.md) | 모든 도메인이 깔고 앉는 인프라 | `get_db`(트랜잭션), `BaseEntity`, 예외체계, JWT/`CurrentUser`, 멱등성, 스케줄러 5잡 |
 | **02** | [인증 · 유저 · 세대](./02-auth-user-household.md) | 회원가입 → 로그인/토큰갱신 → "부부가 한 세대로" | `JWT`(access/refresh), `CurrentHousehold`(X-Household-Id), `household_members` |
 | **03** | [계좌(account)](./03-account.md) | 통장의 모든 것 — 최기반 도메인 | 통장 타입 8종, 잔액=계산값(`start_balance+거래합`), `is_archived` vs soft-delete |
-| **04** | 카테고리 · 거래(transaction) *(예정)* | 가계부의 심장 — 수입/지출/이체 | `VALUATION`, 계좌 잔액 반영, 이체 양방향 |
-| **05** | 고정지출 · 스냅샷 *(예정)* | 매월 반복되는 것 · 월말 잔액 박제 | 고정지출 메타, 스케줄러가 만드는 월간 스냅샷 |
-| **06** | 포트폴리오 매매 *(예정)* | 투자 종목 보유·매매 | 평단(이동평균), 실현손익 replay, BUY/SELL |
-| **07** | 시세 · 환율 · 순자산 *(예정)* | 가격을 채우고 자산을 합산 | 내부 인프라 도메인, 평가액 히스토리, `wealth` 통합 |
-| **08** | 홈 · 통계 · 설정 *(예정)* | 화면에 뿌리는 집계 | 대시보드, 월별/카테고리 통계, enum 노출 |
+| **04** | [카테고리 · 거래(transaction)](./04-category-transaction.md) | 가계부의 심장 — 수입/지출/이체 | 거래 5종, 계좌 잔액 반영, 이체 양방향, 러닝밸런스 |
+| **05** | [고정지출 · 스냅샷](./05-fixed-snapshot.md) | 매월 반복되는 것 · 월말 잔액 박제 | 고정지출 메타, 월간 스냅샷 catch-up/upsert, 스케줄러 |
+| **06** | [포트폴리오 매매](./06-portfolio-trading.md) | 투자 종목 보유·매매 | 평단(이동평균) replay, 실현손익 박제, 월별 평가액 |
+| **07** | [시세 · 환율 · 순자산](./07-pricing-snapshot-wealth.md) | 가격을 채우고 자산을 합산 | 라우터 없는 내부 배치 도메인, 야후 연동, `wealth` 자산배분 |
+| **08** | [홈 · 통계 · 설정](./08-home-stats-settings.md) | 화면에 뿌리는 집계 | 대시보드 1호출, 월별/카테고리 통계, 위임 집계 |
 
-> *(예정)* = 아직 작성 전. 배치별로 끊어 만든다(아래 진행 현황).
+> 전 배치 작성 완료 — 시리즈 9개 문서 완결.
 
 ---
 
@@ -81,9 +81,9 @@
 |---|---|---|
 | 1 | 00-overview, 01-core-infra | ✅ 완료 |
 | 2 | 02-auth-user-household, 03-account | ✅ 완료 |
-| 3 | 04-category-transaction, 05-fixed-snapshot | ⏳ 예정 |
-| 4 | 06-portfolio-trading, 07-pricing-snapshot-wealth | ⏳ 예정 |
-| 5 | 08-home-stats-settings | ⏳ 예정 |
+| 3 | 04-category-transaction, 05-fixed-snapshot | ✅ 완료 |
+| 4 | 06-portfolio-trading, 07-pricing-snapshot-wealth | ✅ 완료 |
+| 5 | 08-home-stats-settings | ✅ 완료 |
 
 ---
 
