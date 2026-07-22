@@ -8,6 +8,8 @@
 
 **로드맵·포폴 초안 확정 (2026-07-21).** 포폴 6카드 = 메인4(배포 안전망 / POST 멱등성 / 3계층 백업+복구 리허설 / 장애 알림·관측) + 보조2(advisory lock 한 줄 / AI 코드 이력 추적 183건). `(→ N번 후)` 표시 문장(테스트 검증·RTO·알림)은 로드맵 구현 후 X 채워 확정. 검증된 숫자: 도메인 17 / 마이그레이션 **22**(23은 `__pycache__` 오카운트) / 태그 배포 18회 / 잡 5개 / AI 로그 183건. 실운영 상태: 배포됐지만 실사용 미미 → "운영 성과" 아닌 "운영 준비도·체계" 톤 필수.
 
+**노션 재료 반영 (2026-07-22).** 노션 Private메모DB 26건 검토 → realized_pnl 백필 회고를 포폴 "실제 데이터 사고 대응 기록" 섹션 + 이력서 5번째 불릿으로 추가 (근거: `alembic/versions/c3d5e7f9a1b2_backfill_realized_pnl.py` 실존 확인). **nginx 502 건은 제외 결정** — 노션 노트(2026-05-19)의 resolver 픽스가 nginx.conf git 이력 전체에 미적용 상태(현재 upstream 리터럴 유지)라 서술하면 거짓. 적용(nginx 1.27.3+ upstream `resolve` 파라미터 방식 추천됨) 후 재검토. AOP·fail2ban 유보 건도 미채택. **백필 서술 codex 3차 교차검증 통과 (2026-07-22)**: [P1] 3건 반영 — "IS NULL 행만 멱등"→종목 단위 선별로 정정(UPDATE 에 IS NULL 조건 없음), "서비스 코드와 동일"→`_recompute_realized_pnl` 로 한정(sell() 은 별도 경로), "정합 일치" 삭제(검증 근거 없음). 면접 예상 질문 6개는 포폴 작성 노트에 기록.
+
 ## Context
 
 - **로드맵 순서**: 1 테스트+CI 게이트(실 PostgreSQL 필수, 멱등성 asyncio.gather 동시 N발 + advisory lock 경쟁 + 선택 fault-injection) → 2 주간 자동 복구 리허설(RTO 실측) → 3 장애 알림(잡/백업/배포/헬스체크 webhook) → 4 migration playbook(expand-contract) → 실증: compose 앱 2개 다중 인스턴스 멱등성. 옵션: 용량 한계 실측·오버헤드·무중단 배포. 상세·확정 판단 표는 `docs/portfolio-sre-roadmap.md`.
