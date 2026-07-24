@@ -1,0 +1,22 @@
+services:
+  # 테스트 전용 PostgreSQL — 운영과 동일 엔진(ON CONFLICT / advisory lock semantics 보존).
+  # 데이터는 tmpfs 라 휘발성: 매 기동 clean + 빠름. 포트 55432 로 로컬 운영 DB 와 충돌 회피.
+  postgres-test:
+    image: postgres:17-alpine
+    container_name: household-postgres-test
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test_household
+      TZ: Asia/Seoul
+    ports:
+      - "55432:5432"
+    tmpfs:
+      # 빈 DB 로 기동 — conftest 가 SQLAlchemy 모델(런타임 진실)로 metadata.create_all.
+      # ddl/init.sql 은 코드와 불일치(idempotency 누락 등)라 테스트 스키마 소스로 안 씀.
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d test_household"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
