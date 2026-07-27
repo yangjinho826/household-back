@@ -43,13 +43,25 @@
 > **A12 근거(codex 검증)**: `middleware.py` 는 `status_code >= 500` 에서만 release → 4xx 는 COMPLETED 로 캐시된다. "4xx 를 멱등 캐시하는 게 맞나"는 논쟁적(재시도로 고칠 수 있는 검증 실패까지 굳힘) — 면접 방어 포인트로 보관.
 
 ## B. advisory lock 🟡 (`tests/scheduler/`)
-| # | 시나리오 | 상태 |
-|---|---|---|
-| B1 | 세션 2개 같은 job key → 1개만 획득(True) | ⬜ |
-| B2 | 다른 job key → 둘 다 획득 | ⬜ |
-| B3 | xact 종료 후 재획득 가능 | ⬜ |
-| B4 | lock 실패 시 fn skip | ⬜ |
-| B5 | fn 예외 → 롤백 + 재발생 | ⬜ |
+
+**공개계약** (`app/core/scheduler.py` docstring)
+- `try_advisory_lock(session, key) -> bool` — `pg_try_advisory_xact_lock(hashtext(key))`. **트랜잭션 스코프**(tx 종료 시 자동 해제, 명시 unlock 없음) / 실패 시 **대기 없이 False**(호출자가 skip 결정) / "같은 잡이 다중 인스턴스·워커에서 동시 진입해도 1개만 통과"
+- `run_locked_job(job_name, fn)` — ① 자체 `async_session`(요청 DI 와 분리) ② 명시 `session.begin()`(락 유효 범위 = 이 tx) ③ 락 실패 시 **조용히 skip**(fn 미호출·예외 X·info 로그) ④ `fn(session)` 실행 ⑤ 예외는 로그 후 **재발생**(begin 컨텍스트 이탈 → 롤백)
+
+| # | 시나리오 | 기대 | 위험 | 상태 |
+|---|---|---|---|---|
+| B1 | 세션 2개(독립 커넥션)가 tx 를 연 채 같은 key | 1번째 True / 2번째 **False** — 블로킹 없이 즉시. `pg_backend_pid()` 상이도 함께 단언 | 🟡 | ✅ |
+| **B1-nc** | 대조군: **같은 세션**이 같은 key 2회 | 둘 다 True — 판정 단위가 커넥션임을 보이고, B1 의 False 가 "무조건 False" 가 아님을 배제 | 🟡 | ✅ |
+| B2 | 세션 2개, **다른** key | 둘 다 True — 락이 잡 이름 단위로 분리 | 🟡 | ✅ |
+| B3 | 세션1 tx 종료 후 세션2가 같은 key | True — xact 스코프라 명시 unlock 없이 자동 해제 | 🟡 | ✅ |
+| B4 | 외부 세션이 key 선점 → `run_locked_job(같은 이름)` | fn **미호출**(0회) + 예외 없이 정상 반환(skip) | 🟡 | ✅ |
+| **B4-nc** | 대조군: 선점 없이 같은 `run_locked_job` | fn **1회 호출** + 쓴 행 커밋됨 — B4 의 미호출이 락 때문임을 배제 검증 | 🟡 | ✅ |
+| **B6** | `run_locked_job` 2개 **동시 실행**(`asyncio.gather`, 같은 잡 이름) | fn 총 **1회**만 실행 + 행 1건 — 계약의 "다중 인스턴스·워커 동시 진입 시 1개만 통과" 직접 검증 | 🔴 | ✅ |
+| B5 | fn 이 행 INSERT 후 예외 | 예외 **재발생**(호출자로 전파) + INSERT 롤백(0건) | 🔴 | ✅ |
+
+> B1/B4 의 nc 는 "상수 False·상수 미호출" 오작동을 배제하는 **대조군**이지, 락을 제거한 mutant 로 N건을 관찰하는 A11-nc 급 역증명은 아니다(codex 지적 채택). 완전 역증명은 `pg_try_advisory_xact_lock` 자체를 무력화한 변형이 필요 — 복잡도 대비 이득이 낮아 보류.
+> **B6 은 codex 교차검증에서 나온 누락**(B4 는 수동 holder 라 "동시 진입"의 간접 증거). `asyncio.Event` 로 순서를 고정해 flaky 를 제거했다 — 경쟁자는 첫 잡이 락을 쥔 동안에만 시도하고, 첫 잡은 경쟁자 판정이 끝난 뒤 진행한다.
+> job key 는 테스트마다 uuid — advisory lock 은 **DB 전역 네임스페이스**라 고정 문자열이면 테스트 간 간섭이 난다.
 
 ## C. fault-injection ⚪ (면접 미끼, `tests/idempotency/`)
 | # | 시나리오 | 상태 |
