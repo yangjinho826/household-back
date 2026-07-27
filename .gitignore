@@ -15,6 +15,12 @@ logs/
 .claude/memory-bank/_progress.log
 .gstack/
 
+# 테스트/커버리지 산출물
+.coverage
+.coverage.*
+.pytest_cache/
+htmlcov/
+
 # 로컬 전용 시드 (화면 확인용 데이터)
 scripts/seed_*.sql
 
