@@ -20,6 +20,30 @@ docker compose -f docker-compose.yml up
 
 서버 기동 후: `GET /v1/health` 로 핑 확인.
 
+## 테스트
+
+테스트는 **실 PostgreSQL**(운영과 동일 엔진)에서 돈다 — 멱등성 `ON CONFLICT` / advisory lock semantics 를 SQLite 가 재현 못 하기 때문. `docker-compose.test.yml` 이 tmpfs 휘발성 PG(포트 55432)를 띄운다.
+
+```bash
+# 1. 테스트 PG 기동 (healthy 될 때까지 몇 초 — 한 번 띄우면 계속 떠 있음)
+docker compose -f docker-compose.test.yml up -d
+
+# 2. 실행 (컨테이너 떠 있는 동안 몇 번이든)
+uv run pytest                       # 전체
+uv run pytest tests/idempotency -v  # 멱등성 시나리오만 (케이스별 표시)
+uv run pytest tests/smoke -v        # 환경 스모크만
+
+# 커버리지
+uv run pytest --cov=app --cov-branch --cov-report=term-missing
+
+# 3. 정리 (tmpfs 라 데이터 자동 소멸)
+docker compose -f docker-compose.test.yml down
+```
+
+- `ConnectionRefused 55432` → 테스트 PG 가 안 떠 있는 것. 1번 다시 실행하고 `docker ps` 에 `(healthy)` 뜨는지 확인 후 pytest.
+- 스키마는 SQLAlchemy 모델(`Base.metadata.create_all`)로 생성하고 매 테스트 후 `TRUNCATE` 로 격리한다.
+- 시나리오 체크리스트: `tests/SCENARIOS.md` (A 멱등성 / B advisory lock / C fault-injection / D 도메인).
+
 ## 디렉토리 구조
 
 ```
