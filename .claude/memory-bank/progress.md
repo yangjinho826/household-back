@@ -2,6 +2,7 @@
 
 ## 완료
 - [ ] 초기 셋업
+- [x] 2026-07-27: SRE 로드맵 1번 D2 포트폴리오 실현손익 — `tests/domain/test_portfolio_pnl.py` **4 케이스**(D2-1·D2-2 GREEN / **D2-3·D2-4 RED → 소스 결함 발견·수정**). 전체 28 → **32 passed**, 회귀 0. **A~C 최초의 진짜 소스 결함**: 진실 원천이 2개였다 — `buy()`/`sell()` 은 incremental(입력 순서, 그 순간 `item.avg_price`), `_recompute_realized_pnl()` 은 replay(`tx_date asc`). 백데이팅 매수(매도보다 앞선 날짜를 뒤늦게 입력) 시 두 값이 갈리고, **금액과 무관한 memo 수정 한 번**이 저장값을 뒤집었다(실현손익 25,000 → 0, 평단 1,666.67 → 1,500). 수정: buy/sell 의 incremental 계산 제거 → `_recalc_item_from_transactions`(replay) 로 통일, sell 의 사전 `realized_pnl` 박제 제거, 전량매도 판정을 replay 결과 기준으로. **D3(IDOR)은 사전 전수 스캔으로 강등** — `app/domain/*/service.py` public 함수 중 `find_by_id` 후 소속 검증 없는 곳 0건(user 도메인만 예외 = 멤버 초대용 설계 선택).
 - [x] 2026-07-27: SRE 로드맵 1번 C fault-injection — `tests/idempotency/test_crash_window.py` **3 케이스 통과**(C1 예외주입 / C2·C3 state-based sim), 멱등성 커버리지 92%→**97%**, 소스 무수정(자백 목적). **핵심 실측: C1 이 A9 와 갈림** — 라우터 성공 후 미들웨어 예외는 거래 1건이 남는다(A9 은 0건) → `call_next` 반환 시점에 `get_db` 커밋이 이미 끝났다는 직접 증거 = crash window 실재. C3 = TTL 만료 후 재시도 시 **거래 2건** → exactly-once 아님 확정. codex 지적 반영: 용어를 fault injection(C1만)/state-based simulation(C2·C3)으로 분리, 나머지 crash 지점 4개는 최종 상태가 C1·C2 로 **수렴**함을 논증해 기각, 면접 반격 4개는 `SCENARIOS.md` 표로 보관.
 - [x] 2026-07-27: SRE 로드맵 1번 B advisory lock — `tests/scheduler/test_advisory_lock.py` **8 케이스 통과**(B1/B1-nc/B2/B3/B4/B4-nc/B5 + codex 지적으로 신설한 **B6 동시 `run_locked_job` 경합**). 락 로직 커버리지 100%(미커버는 cron 등록부), **소스 결함 0**. codex 3건 중 2건 채택(pg_backend_pid 단언·B6), 1건 기각(B3/B4 중복). nc 용어를 "역증명"→"대조군"으로 정정 — A11-nc(보호 제거 → N건)와 달리 B 의 nc 는 상수 오작동 배제까지만.
 - [x] 2026-07-27: SRE 로드맵 1번 ① 시나리오 + A 멱등성 — `tests/SCENARIOS.md`(공개계약 도출, codex 교차검증 2건 반영) + `tests/fixtures/factory.py`(seed 후 commit) + `tests/idempotency/` **14 케이스 통과**(A1~A12 + A11/A11-nc 동시성 대조: 1건 vs N건). 멱등성 코어 커버리지 92%, **소스 결함 0**(초기 실패 2건은 테스트 하니스 문제). 면접 미끼: A10 경로 실체(글로벌 핸들러가 미들웨어 바깥)·4xx 캐싱 계약.
@@ -15,7 +16,7 @@
 - [x] 2026-06-03: codex 백엔드 전체 QA 7개 수정 (PATCH 이체 깨짐 / fixed_expense_id 검증 / 카테고리 kind / 종목 재계산 스킵 / 수동자산 cascade / 계좌 N+1 배치화 / bcrypt async) + 테스트 13개
 
 ## 진행 중
-- [ ] 2026-07-24: SRE 로드맵 1번 — 테스트 스위트 + CI 게이트. **⓪ 환경 + ① 시나리오 + A(14) + B(8) + C(3) 완결 — 전체 28 passed**, 다음 **D 도메인 🔴 4~5개** → ④ CI 2중 게이트(ci.yml+deploy) → ⑥ 포폴 X 채움. 계획: `~/.claude/plans/drifting-knitting-corbato.md`. 스키마 소스는 `create_all`(빈 alembic baseline). 각 단계 완료 시 노션 Phase1 진행기록 페이지에 누적 정리(규칙 메모리화).
+- [ ] 2026-07-24: SRE 로드맵 1번 — 테스트 스위트 + CI 게이트. **⓪ 환경 + ① 시나리오 + A(14) + B(8) + C(3) + D2(4) — 전체 32 passed**, 다음 **D1 ledger running balance**(D3 강등, D4 선택) → ④ CI 2중 게이트(ci.yml+deploy) → ⑥ 포폴 X 채움. 계획: `~/.claude/plans/drifting-knitting-corbato.md`. 스키마 소스는 `create_all`(빈 alembic baseline). 각 단계 완료 시 노션 Phase1 진행기록 페이지에 누적 정리(규칙 메모리화).
 
 ## 막힘
 - [x] 2026-06-04: 평가금 수정 거래화면 이동(통장 칩+타입분기) + 모바일 삭제버튼 z-index 수정 + 도커 DB 포트 override
