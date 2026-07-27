@@ -141,6 +141,51 @@ class TxContext:
 
 
 @dataclass
+class LedgerContext:
+    """계좌 원장 테스트용 셋업 — 거래통장 2개(이체용) + 수동자산 통장(평가조정용)."""
+
+    user: User
+    household: Household
+    account: Account
+    other_account: Account
+    manual_asset: Account
+    expense_category: Category
+    income_category: Category
+
+
+async def seed_ledger_context(
+    db: AsyncSession, *, start_balance: Decimal = Decimal("0"),
+) -> LedgerContext:
+    """user→household→membership→통장 3종→카테고리 2종. flush 까지만.
+
+    통장이 3개인 이유: 이체는 출발/도착 두 계좌가 필요하고(D1-4), 평가조정은
+    수동자산 통장에만 허용되기 때문(_validate_fk_belong_to_household).
+    카테고리도 2종 — 지출 거래엔 EXPENSE, 수입 거래엔 INCOME kind 만 통과한다.
+    """
+    user = await user_factory(db)
+    household = await household_factory(db, owner=user)
+    await member_factory(db, household=household, user=user)
+    account = await account_factory(db, household=household, start_balance=start_balance)
+    other_account = await account_factory(db, household=household, name="비상금 통장")
+    manual_asset = await account_factory(
+        db, household=household, name="아파트", account_type=AccountType.REAL_ESTATE,
+    )
+    expense_category = await category_factory(db, household=household)
+    income_category = await category_factory(
+        db, household=household, kind=CategoryKind.INCOME, name="급여",
+    )
+    return LedgerContext(
+        user=user,
+        household=household,
+        account=account,
+        other_account=other_account,
+        manual_asset=manual_asset,
+        expense_category=expense_category,
+        income_category=income_category,
+    )
+
+
+@dataclass
 class PortfolioContext:
     """포트폴리오 도메인 테스트용 셋업 — INVESTMENT 통장까지."""
 

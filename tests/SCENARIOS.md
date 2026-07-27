@@ -148,10 +148,41 @@ await session.commit()                           # 109
 > (replay)로 통일. `sell()` 의 사전 `realized_pnl` 박제도 제거 — replay 가 매도시점 평단으로 채운다.
 > 전량매도 판정은 replay 결과(`item.quantity == 0`) 기준으로 변경.
 
+### D1. 계좌 원장 running balance 🔴 (`test_account_ledger.py`)
+
+**공개계약** (`transaction/service.py:81-133` docstring)
+- "잔액은 기준 잔액에서 desc 로 역산… 한 칸 옛 거래로 내려갈 때마다 위 행의 `signed_amount` 를
+  빼서 그 아래 잔액을 만든다. 페이지 경계는 carry 를 커서에 실어 이어붙인다."
+- "year+month 를 주면… 기준점은 그 달 말까지의 누적 잔액이라 **미래 달 거래와 무관하게** 그 달 안에서 잔액이 맞는다."
+
+**착수 전 코드 독해 — D2 같은 결함 가설은 안 나왔다.** D2 는 같은 값을 두 경로가 다른 순서로
+계산해 갈렸는데, D1 은 두 경로의 규칙이 일치한다:
+
+| 검토 항목 | 결과 |
+|---|---|
+| 부호 2경로 — `_signed_amount`(`service.py:422`) vs `sum_for_account`(`repository.py:185`) | INCOME/EXPENSE/TRANSFER 양방향/VALUATION 방향 전부 **규칙 일치** |
+| 조회 필터 vs 잔액 합산 필터 | 둘 다 `or_(account_id, to_account_id)` 대칭 |
+| 자기 이체(잔액 이중계상 후보) | 스키마(`schema.py:58`) + `_validate_transfer_consistency` 이중 차단 |
+| `ValuationDirection` 문자열 비교 | `StrEnum` 이라 DB 문자열과 정상 비교 |
+
+| # | 불변식 | 시나리오 | 상태 |
+|---|---|---|---|
+| D1-1 | **INV-A 닫힘** | 시작잔액 + 수입·지출·이체 5건 → 끝까지 순회 시 마지막 행 `balance_after − signed_amount == start_balance`, 인접 행끼리도 한 칸씩 연결 | ✅ GREEN |
+| D1-2 | **INV-B 페이지 불변** | 거래 6건, `limit=100`(1페이지) vs `limit=2`(3페이지)의 `(id, balance_after)` 열 동일 | ✅ GREEN |
+| D1-3 | **INV-C 월 기준점** | 전월 2 + 당월 2 상태에서 조회 → **다음 달 거래 2건 추가 후 재조회** → 당월 잔액 불변 | ✅ GREEN |
+| D1-4 | **INV-D 이체 부호** | 한 이체가 출금 원장 `−amount` / 입금 원장 `+amount`, 같은 `tx.id` 양쪽 1행씩 | ✅ GREEN |
+| D1-5 | **INV-E 평가조정 부호** | 수동자산 통장 VALUATION INCREASE `+` / DECREASE `−`, 잔액 누적 | ✅ GREEN |
+
+> **소스 결함 0.** 잔액이 저장값이 아니라 계산 결과인데도 역산이 정확히 닫혔다.
+> **D1-2 의 페이지 수 단언이 핵심 장치**: `paged_pages == 3` 을 단언하지 않으면 커서가 한 페이지만
+> 돌고도 "페이지 불변"이 통과해버린다 — 경로를 실제로 탔음을 강제한다(A11-nc 와 같은 정신).
+> **D2 와의 대비**: 같은 "값을 두 곳에서 계산" 구조인데 D1 은 규칙이 일치해 안 갈렸다.
+> 결함을 가른 건 구조가 아니라 **두 경로가 같은 순서·같은 규칙을 보는가**였다.
+
 ### 남은 후보 (미착수)
 
 | # | 시나리오 | 비고 |
 |---|---|---|
-| D1 | 계좌 ledger running balance 정합 (역산 + 페이지 경계 carry) | 잔액을 저장 않고 desc 역산 — D2 와 같은 "계산 결과" 성격 |
 | D3 | household IDOR | 위 스캔 근거로 후순위 (회귀 안전망) |
 | D4 | 종목 수량/평단 상태 전이 (매도>매수 차단, 소멸/부활) | D2 수정으로 replay 경로 일원화됨 — 경계 재확인 가치 |
+| D1-6 | 깨진 커서 fallback (`_split_ledger_cursor`/`_cursor_after` 파싱 실패 시 조용히 1페이지 반복) | D1 스코프 밖으로 뺀 엣지 — `service.py:447,450-451` 미커버 |
