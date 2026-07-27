@@ -107,12 +107,51 @@ await session.commit()                           # 109
 | TTL 만료 후 중복은 설계 선택 아닌가 | 그렇다. 그래서 버그 리포트가 아니라 **자백**이다. 고치려면 outbox·2PC 급이 필요해 이 규모엔 과하다고 판단했다 |
 | DB 직접 update 가 인위적이다 | 인정. 그래서 C1(진짜 주입)과 C2·C3(상태 시뮬)를 표에서 구분해 표기했다 |
 
-## D. 도메인 핵심 🔴 4~5개 (`tests/domain/`)
-| # | 시나리오 | 상태 |
-|---|---|---|
-| D1 | transaction create → 계좌 ledger running balance 정합 | ⬜ |
-| D2 | portfolio realized_pnl (백필 사고 로직) | ⬜ |
-| D3 | household IDOR — 타 household 리소스 접근 차단 | ⬜ |
-| D4 | auth 로그인·토큰 발급/검증 | ⬜ |
+## D. 도메인 핵심 🔴 (`tests/domain/`)
 
-> D 최종 대상은 A~C 끝난 뒤 각 도메인 공개계약 읽고 확정.
+**대상 확정 근거 (2026-07-27)** — 후보 4개 중 D3(IDOR)는 사전 전수 스캔으로 강등했다.
+`app/domain/*/service.py` 의 public 함수 중 `find_by_id` 후 소속 검증이 없는 곳을 스캔한
+결과, 전 도메인이 `household_id != household.id → NOT_FOUND` 를 갖고 있었다. 예외는
+`user` 도메인(`detail_user`/`search_by_email`)뿐인데 이건 **멤버 초대용 설계 선택**이다
+(라우터에 `인증 가드용` 주석 명시, 응답은 id/email/name/language 만).
+→ D3 는 GREEN 이 뻔해 회귀 안전망 가치만 남으므로 후순위.
+
+### D2. 포트폴리오 실현손익/평단 🔴 (`test_portfolio_pnl.py`)
+
+**공개계약** (`portfolio/service.py`)
+- `_recompute_realized_pnl` docstring — "거래를 **시간순 replay** 하며 각 SELL 의 실현손익을
+  그 시점 평단으로 재박제. 거래 수정/삭제로 평단이 바뀌면 과거 SELL 의 박제값이 틀어지므로"
+- `_recalc_item_from_transactions` docstring — "매도 시점 평단으로 원가를 차감하므로
+  **매도 후 재매수도 정확히 반영**"
+
+**도출한 불변식(INV)**: 활성 거래 집합이 같으면 각 SELL 의 `realized_pnl` 과 종목의
+`quantity`/`avg_price` 는 같다 — 재계산이 언제 트리거됐는지와 무관하게.
+
+| # | 시나리오 | 기대 | 최초 실측 | 상태 |
+|---|---|---|---|---|
+| D2-1 | 매도 후 재매수 평단 | 잔여원가+신규원가 / 잔여수량 | GREEN | ✅ |
+| D2-2 | 과거 BUY 단가 수정 → 과거 SELL 재박제 | 25,000 → 15,000 | GREEN | ✅ |
+| **D2-3** | **백데이팅 매수**(매도보다 앞선 `tx_date` 를 뒤늦게 입력) | pnl 0 / 평단 1,500 | **RED — pnl 25,000 / 평단 1,666.67** | ✅ |
+| **D2-4** | D2-3 상태에서 **memo 만** 수정 → 재계산만 트리거 | 값 불변 | **RED — 25,000 → 0 으로 변동** | ✅ |
+
+> **찾은 결함(수정 완료)**: 진실 원천이 2개였다.
+> | 경로 | 계산 | 순서 기준 |
+> |---|---|---|
+> | `buy()`/`sell()` | incremental — 그 순간의 `item.avg_price` | **입력 순서**(날짜 무관) |
+> | `_recompute_realized_pnl()` | replay — 처음부터 재계산 | **`tx_date asc`** (`repository.py:236`) |
+>
+> 두 경로가 다른 순서를 보므로 백데이팅 매수 시 값이 갈리고, **금액과 무관한 수정(memo) 한 번**이
+> 저장값을 replay 값으로 뒤집었다. C(crash window)와 달리 이건 자백 대상이 아니라 **수정 대상** —
+> 고치는 비용이 재계산 호출 한 줄이라 "알고도 안 고쳤다"가 성립하지 않는다.
+>
+> **수정**: `buy()`/`sell()` 의 incremental 계산을 제거하고 `_recalc_item_from_transactions`
+> (replay)로 통일. `sell()` 의 사전 `realized_pnl` 박제도 제거 — replay 가 매도시점 평단으로 채운다.
+> 전량매도 판정은 replay 결과(`item.quantity == 0`) 기준으로 변경.
+
+### 남은 후보 (미착수)
+
+| # | 시나리오 | 비고 |
+|---|---|---|
+| D1 | 계좌 ledger running balance 정합 (역산 + 페이지 경계 carry) | 잔액을 저장 않고 desc 역산 — D2 와 같은 "계산 결과" 성격 |
+| D3 | household IDOR | 위 스캔 근거로 후순위 (회귀 안전망) |
+| D4 | 종목 수량/평단 상태 전이 (매도>매수 차단, 소멸/부활) | D2 수정으로 replay 경로 일원화됨 — 경계 재확인 가치 |

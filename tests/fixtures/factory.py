@@ -140,6 +140,30 @@ class TxContext:
         }
 
 
+@dataclass
+class PortfolioContext:
+    """포트폴리오 도메인 테스트용 셋업 — INVESTMENT 통장까지."""
+
+    user: User
+    household: Household
+    account: Account
+
+
+async def seed_portfolio_context(db: AsyncSession) -> PortfolioContext:
+    """user→household→membership→INVESTMENT 통장. flush 까지만.
+
+    포트폴리오 손익 테스트는 단일 세션에서 서비스 함수를 직접 호출하므로
+    seed_transaction_context 와 달리 commit 이 불필요하다(동시성 없음).
+    """
+    user = await user_factory(db)
+    household = await household_factory(db, owner=user)
+    await member_factory(db, household=household, user=user)
+    account = await account_factory(
+        db, household=household, name="증권 계좌", account_type=AccountType.INVESTMENT,
+    )
+    return PortfolioContext(user=user, household=household, account=account)
+
+
 async def seed_transaction_context(db: AsyncSession) -> TxContext:
     """user→household→membership→account→category 를 심고 **commit**.
 
