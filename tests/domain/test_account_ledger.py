@@ -240,3 +240,70 @@ async def test_D1_5_평가조정은_방향대로_부호가_붙는다(db, ctx):
     assert page.items[0].balance_after == Decimal("400000")
     assert page.items[1].signed_amount == Decimal("500000")
     assert page.items[1].balance_after == Decimal("500000")
+
+
+# ── D1-6. 깨진/조작된 커서 (계약 확인 — 현재 동작 박제) ──────────────────
+#
+# `_split_ledger_cursor`(carry 분리)와 `_cursor_after`(3-tuple 파싱) 둘 다 파싱에
+# 실패하면 **예외 없이 조용히 None 을 리턴**한다. 즉 잘못된 커서는 거부되지 않고
+# "커서 없음"으로 취급돼 1페이지가 돌아온다. 계약 문서엔 이 분기가 안 적혀 있어
+# 실측으로 확정한다.
+
+
+async def test_D1_6a_깨진_커서는_거부되지_않고_첫_페이지로_되돌아간다(db, ctx):
+    """조용한 fallback — 400 이 아니라 1페이지. 클라이언트는 중복 행을 받는다."""
+    # given: 거래 4건, 2건씩 페이징
+    for day in range(1, 5):
+        await _expense(db, ctx, "1000", date(2026, 1, day))
+    first = await _ledger(db, ctx, limit=2)
+    assert first.has_next
+
+    # when: 커서 자리에 쓰레기를 넣는다
+    broken = await _ledger(db, ctx, cursor="garbage", limit=2)
+
+    # then: 예외 없이 1페이지와 동일한 행 (조용히 처음으로 되돌아감)
+    assert [i.id for i in broken.items] == [i.id for i in first.items]
+    assert [i.balance_after for i in broken.items] == [
+        i.balance_after for i in first.items
+    ]
+
+
+async def test_D1_6b_carry_만_깨지면_커서_전체가_무효화되고_잔액은_재계산된다(db, ctx):
+    """carry 파싱 실패 시 `_split_ledger_cursor` 가 커서 전체를 그대로 넘겨
+    `_cursor_after` 까지 실패한다 → 페이지는 처음으로 가지만 잔액은 재계산되어 정확하다.
+    """
+    # given
+    for day in range(1, 5):
+        await _expense(db, ctx, "1000", date(2026, 1, day))
+    first = await _ledger(db, ctx, limit=2)
+    valid_cursor = first.next_cursor
+
+    # when: 정상 커서의 carry 자리만 숫자가 아닌 값으로 바꾼다
+    base, _, _carry = valid_cursor.rpartition("|")
+    tampered = await _ledger(db, ctx, cursor=f"{base}|not-a-number", limit=2)
+
+    # then: 1페이지로 되돌아가되 잔액 기준점은 서버가 다시 계산한 값
+    assert [i.id for i in tampered.items] == [i.id for i in first.items]
+    assert tampered.items[0].balance_after == first.items[0].balance_after
+
+
+async def test_D1_6c_carry_숫자를_바꾸면_그_값이_잔액_기준점이_된다(db, ctx):
+    """⚪ 의도된 한계 — carry 가 숫자로 파싱되기만 하면 서버는 검증 없이 그대로 쓴다.
+
+    잔액 기준점을 클라이언트가 정할 수 있다는 뜻. 자기 화면만 틀어지는 read-only
+    경로라 피해는 제한적이지만, "잔액은 서버가 계산한다"는 신뢰와는 어긋난다.
+    """
+    # given
+    for day in range(1, 5):
+        await _expense(db, ctx, "1000", date(2026, 1, day))
+    first = await _ledger(db, ctx, limit=2)
+    base, _, real_carry = first.next_cursor.rpartition("|")
+
+    # when: carry 만 엉뚱한 숫자로 바꾼다
+    tampered = await _ledger(db, ctx, cursor=f"{base}|999999", limit=2)
+    honest = await _ledger(db, ctx, cursor=first.next_cursor, limit=2)
+
+    # then: 행은 같은데 잔액만 조작값 기준으로 밀린다
+    assert [i.id for i in tampered.items] == [i.id for i in honest.items]
+    assert honest.items[0].balance_after == Decimal(real_carry)
+    assert tampered.items[0].balance_after == Decimal("999999")
