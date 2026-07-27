@@ -63,10 +63,49 @@
 > **B6 은 codex 교차검증에서 나온 누락**(B4 는 수동 holder 라 "동시 진입"의 간접 증거). `asyncio.Event` 로 순서를 고정해 flaky 를 제거했다 — 경쟁자는 첫 잡이 락을 쥔 동안에만 시도하고, 첫 잡은 경쟁자 판정이 끝난 뒤 진행한다.
 > job key 는 테스트마다 uuid — advisory lock 은 **DB 전역 네임스페이스**라 고정 문자열이면 테스트 간 간섭이 난다.
 
-## C. fault-injection ⚪ (면접 미끼, `tests/idempotency/`)
-| # | 시나리오 | 상태 |
-|---|---|---|
-| C1 | 비즈 커밋 후 `mark_completed` 전 예외 주입 → release → 재시도서 **재실행**(crash window = exactly-once 아님을 자백). 소스 안 고침 | ⬜ |
+## C. fault-injection ⚪ (면접 미끼, `tests/idempotency/test_crash_window.py`)
+
+> **이 섹션의 RED 는 수정 대상이 아니라 자백 대상이다.** A·B 가 "계약이 지켜짐"을 증명했다면 C 는 안 지켜지는 구간을 통과하는 테스트로 박제한다. 소스는 안 고친다 — "알고도 안 고쳤다"가 면접 카드(`docs/portfolio-sre-roadmap.md` 확정 판단).
+
+**crash window 위치** (`middleware.py:92-109`)
+```python
+response = await call_next(request)              # 92  라우터 실행 → 비즈 tx COMMIT (database.py:51)
+captured_body = await capture_response_body(response)
+                                                 # ←── 여기서 죽으면
+await idempotency_service.mark_completed(...)    # 101 멱등 레코드는 아직 PENDING
+await session.commit()                           # 109
+```
+- 프로세스가 죽으면 `except` 의 `release`(113)조차 못 돈다 → PENDING 잔류 → 같은 키 재시도는 `IN_PROGRESS`(409)로 차단
+- `PENDING_TTL_SECONDS = 60`(`constants.py:2`) 경과 후 `cleanup_expired`(`repository.py:87`)가 잔류 PENDING 삭제 → 재시도가 라우터를 **다시** 태움
+
+| # | 시나리오 | 방식 | 기대 | 상태 |
+|---|---|---|---|---|
+| C1 | `mark_completed` 에 예외 주입 (라우터는 **정상 완료**) | fault injection | 500 + 레코드 0건(release 탐) **+ 거래는 1건 잔류** → 재시도 시 라우터 재실행 → **거래 2건** | ✅ |
+| C2 | 레코드를 PENDING 으로 되돌린 뒤 같은 키 재요청 | state-based sim | **409 / ID003** — 정당한 재시도가 TTL 동안 막힌다 | ✅ |
+| C3 | C2 상태에서 `created_at` 을 TTL 밖으로 밀고 `cleanup_expired` → 같은 키 재요청 | state-based sim | 레코드 삭제 → 락 재획득 → 200 + **거래 2건**. exactly-once 아님 확정 | ✅ |
+
+> **C1 실측이 A9 와 갈린 지점**: A9(라우터 자체가 예외)은 거래 0건이었는데, C1(라우터 성공 후 미들웨어가 예외)은 **거래 1건이 남는다**. `call_next` 가 돌아온 시점엔 `get_db` 의 커밋이 이미 끝나 미들웨어 예외로는 되돌릴 수 없다 = crash window 실재의 직접 증거.
+> **용어 정직성(codex 지적 채택)**: 진짜 fault injection 은 C1 뿐이고 C2·C3 는 state-based simulation 이다. 실제 SIGKILL 은 `release` 조차 못 도는데 예외 주입은 `release` 를 타므로, 그 상태는 주입으로 재현되지 않는다. "크래시를 재현했다"가 아니라 "크래시가 남기는 상태에서 출발했다"가 정확한 표현.
+
+**왜 3개로 충분한가** (codex "빠진 crash 지점" 지적에 대한 답)
+
+| 다른 crash 지점 | 수렴하는 최종 상태 |
+|---|---|
+| `capture_response_body` 중 | 레코드 PENDING 잔류 → **C2** |
+| `mark_completed` 후 `commit`(109) 전 | UPDATE 가 롤백돼 PENDING 잔류 → **C2** |
+| `release` 전 / 후 commit 전 (5xx·예외 경로) | 둘 다 PENDING 잔류 → **C2** |
+| acquire 직후 (라우터 진입 전) | 미커밋 INSERT 가 롤백돼 흔적 0 → 재시도 정상(안전 구간) |
+
+재시도 결과를 가르는 건 crash 시각이 아니라 **남은 레코드 상태**뿐이다. C1(레코드 0 + 거래 잔류)·C2(PENDING 잔류) 두 상태를 덮으면 경우의 수가 닫힌다.
+
+**예상 반격과 답변** (codex 제공 — 면접 대본 재료)
+
+| 반격 | 답변 |
+|---|---|
+| 실제 SIGKILL 이 아니지 않나 | 맞다. 단일 pytest 프로세스에선 재현 불가라 crash 가 **남기는 상태**를 재현했다. 상태가 같으면 재시도 결과도 같다 |
+| 비즈 커밋 시점이 라우터 내부 구현에 의존하는 것 아닌가 | 그래서 C1 을 실측했다 — `call_next` 반환 시점에 이미 커밋돼 있음을 거래 1건 잔류로 확인 |
+| TTL 만료 후 중복은 설계 선택 아닌가 | 그렇다. 그래서 버그 리포트가 아니라 **자백**이다. 고치려면 outbox·2PC 급이 필요해 이 규모엔 과하다고 판단했다 |
+| DB 직접 update 가 인위적이다 | 인정. 그래서 C1(진짜 주입)과 C2·C3(상태 시뮬)를 표에서 구분해 표기했다 |
 
 ## D. 도메인 핵심 🔴 4~5개 (`tests/domain/`)
 | # | 시나리오 | 상태 |
