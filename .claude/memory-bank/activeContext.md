@@ -6,7 +6,9 @@
 
 ## Status
 
-**로드맵 1번 A~C + D2 + D1 완결 (2026-07-27) — 전체 37 passed(멱등성 14+3 / 스케줄러 8 / smoke 3 / 도메인 9), 멱등성 97% · 락 로직 100%. D2 에서 A~C 최초의 진짜 소스 결함 발견·수정, D1 은 예측대로 GREEN. 다음 ④ CI 2중 게이트.**
+**로드맵 1번 A~D 완결 (2026-07-27) — 전체 49 passed(멱등성 14+3 / 스케줄러 8 / smoke 3 / 도메인 21), 멱등성 97% · 락 로직 100%. 다음 ④ CI 2중 게이트(ci.yml + deploy).**
+
+**D 종합 (도메인 21 케이스)**: D1 원장 running balance 5(GREEN) / D1-6 깨진 커서 3(⚪ 의도된 한계) / **D2 실현손익 4(RED 2 → 소스 결함 1건 수정)** / D3 가계부 격리 5(GREEN) / D4 수량·상태 전이 4(GREEN). **D2 만 갈린 이유** — D1·D2 는 똑같이 "값을 두 곳에서 계산"하는 구조인데 D1 은 두 경로의 순서·규칙이 일치했고 D2 는 입력 순서 vs `tx_date asc` 로 갈렸다. 구조가 아니라 **두 경로가 같은 순서·같은 규칙을 보는가**가 결함을 가른다(면접 카드). **D4-2 가 D2 수정의 개선을 박제** — 수정 전엔 전량매도 시 `quantity` 가 마지막 보유량으로 남았고(운영 DB 점검서 25·101·115주 화석 확인), 이제 replay 가 0 까지 맞춘다. **D1-6c 면접 미끼**: 커서에 carry 를 실으면 클라이언트가 잔액 기준점을 통제 — 숫자로 파싱만 되면 서버가 검증 없이 쓴다. read-only 라 피해는 자기 화면뿐이고, 고치려면 매 페이지 재계산(성능) 또는 커서 HMAC 이라 이 규모엔 과함(C 와 같은 "수정 비용이 방어 논리를 가른다").
 
 **D1 계좌 원장 running balance (`tests/domain/test_account_ledger.py`, 5 케이스 전부 GREEN, 소스 결함 0)**: 불변식 5개를 docstring 에서 도출 — A 닫힘(끝까지 순회 시 마지막 행 `balance_after − signed_amount == start_balance`) / B 페이지 불변(`limit=100` 1페이지 == `limit=2` 3페이지) / C 월 기준점(다음 달 거래 추가해도 당월 잔액 불변) / D 이체 부호(출금 −, 입금 +) / E 평가조정 부호(INCREASE +, DECREASE −). **착수 전 코드 독해로 GREEN 을 예측했고 그대로 나왔다** — D2 와 같은 "값을 두 곳에서 계산" 구조지만 `_signed_amount`(service.py:422) 와 `sum_for_account`(repository.py:185) 의 부호 규칙이 일치하고, 조회/합산 필터도 `or_(account_id, to_account_id)` 로 대칭이라 안 갈렸다. **결함을 가른 건 구조가 아니라 두 경로가 같은 순서·같은 규칙을 보는가** — D2 는 입력순서 vs `tx_date asc` 로 갈렸다(면접 대비 대비 카드). D1-2 에 **페이지 수 단언**(`paged_pages == 3`)을 넣어 커서가 한 페이지만 돌고도 통과하는 구멍을 막음. 계획: `~/.claude/plans/d1-snug-newt.md`. 미착수 엣지: D1-6 깨진 커서 fallback(`service.py:447,450-451`).
 
@@ -26,7 +28,7 @@
 ## Next Step
 
 1. ~~**⓪ 환경**~~ **완료**(smoke 3/3). ~~**① SCENARIOS.md + factory.py + A 멱등성**~~ **완료**(14 케이스, A1~A12 + A11/A11-nc 대조, 커버리지 92%). codex 교차검증 반영(A11-nc 재설계·A12 4xx 캐싱). 소스 결함 0, 면접 미끼 2개(A10 경로 실체·4xx 캐싱).
-2. ~~**B advisory lock**~~ **완료**(8 케이스). ~~**C fault-injection**~~ **완료**(3 케이스, `test_crash_window.py`, 계획 `~/.claude/plans/c-dazzling-flamingo.md`). ~~**D2 realized_pnl**~~ **완료**(4 케이스, 결함 1건 수정). ~~**D1 ledger running balance**~~ **완료**(5 케이스 전부 GREEN, 계획 `~/.claude/plans/d1-snug-newt.md`). **다음: ④ CI 2중 게이트** — `ci.yml`(push/PR) + `deploy.yml` 테스트 게이트. D 잔여는 선택: D3 IDOR(회귀 안전망) / D4 종목 상태 전이 / D1-6 깨진 커서 fallback.
+2. ~~**B advisory lock**~~ **완료**(8 케이스). ~~**C fault-injection**~~ **완료**(3 케이스, `test_crash_window.py`, 계획 `~/.claude/plans/c-dazzling-flamingo.md`). ~~**D2 realized_pnl**~~ **완료**(4 케이스, 결함 1건 수정). ~~**D1 ledger running balance**~~ **완료**(5, 계획 `~/.claude/plans/d1-snug-newt.md`). ~~**D 잔여**~~ **완료**(D4 4 / D1-6 3 / D3 5). **D 전체 완결 — 도메인 21 케이스.** **다음: ④ CI 2중 게이트** — `ci.yml`(push/PR) + `deploy.yml` 테스트 게이트. 49 passed 를 배포 조건으로 걸어 백업 게이트와 2중화.
 3. **④ RED 분석·수정** → **⑤ CI**(ci.yml + deploy 게이트) → **⑥ 포폴 X 채움**(A11/A11-nc 대조 결과 = "동일 키 동시 N건 → 1건" 실측 확정).
 4. 이후 로드맵 2→3→4→실증. 완성 후: JD + AI 셀프리뷰 3프롬프트 + 면접 대본 — `carrer/interview/`.
 
