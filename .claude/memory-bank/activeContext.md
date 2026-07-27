@@ -6,7 +6,7 @@
 
 ## Status
 
-**로드맵 1번 ① 시나리오 + A 멱등성 완결 (2026-07-27) — `tests/idempotency/` 14 케이스 통과, 멱등성 코어 커버리지 92%, 소스 결함 0. 다음 B advisory lock.** 테스트 0개 → **명세 기반 사후검증**(소스 이미 있음, TDD 신규작성 아님). 계획: `~/.claude/plans/drifting-knitting-corbato.md`. 확정 결정: 실 PG(docker-compose.test) / 스키마 소스 **`Base.metadata.create_all`**(계획의 `alembic upgrade head` 는 이 레포 baseline 이 빈 마이그레이션이라 스키마 0개 생성 → 정정. decisions.md 참조) / 매 테스트 **TRUNCATE**(동시성 때문에 tx-rollback 불가) / **negative control 역증명**(결과 1건만으론 순차와 구분불가 → 락 우회 버전이 N건 만드는 걸 동일 하니스로 대조) / CI **ci.yml+deploy 게이트 둘 다** / 도메인 통합 D는 **🔴 4~5개만**. codex 순서 교차검증 시도 → 이 환경서 긴 프롬프트 hang("OK" 11초는 되나 4질문 분석은 5분+ timeout, 3회) → **자체 ultrathink 로 4질문 대체 검증**: 순서 타당하나 ⓪smoke·⑤CI 명시 추가, ASGITransport 동시성은 진짜 경합 성립(진짜 PG+독립세션+gather)이나 negative control 없으면 극장.
+**로드맵 1번 ① 시나리오 + A 멱등성 + B advisory lock + C crash window 완결 (2026-07-27) — 전체 28 passed(멱등성 14+3 / 스케줄러 8 / smoke 3), 멱등성 97% · 락 로직 100%, 소스 결함 0. 다음 D 도메인 🔴 4~5개.** C 핵심 실측: 라우터 성공 후 미들웨어 예외는 **거래 1건이 남는다**(A9 은 0건) → `call_next` 반환 시점에 `get_db` 커밋이 이미 끝났다는 직접 증거 = crash window 실재. C3 는 TTL 만료 후 재시도 시 **거래 2건** → exactly-once 아님 확정. codex 반영: 용어를 fault injection(C1)/state-based simulation(C2·C3)으로 분리, 다른 crash 지점 4개는 최종 상태가 C1·C2 로 수렴함을 논증해 기각, 면접 반격 4개는 `SCENARIOS.md` 표로 보관. B 는 codex 교차검증 3건 중 2건 채택 — `pg_backend_pid()` 상이 단언(독립 커넥션 자립 증명) + **B6 동시 `run_locked_job` 경합**(계약 "다중 워커 동시 진입 시 1개만" 직접 검증, `asyncio.Event` 로 순서 고정해 flaky 제거). nc 용어 정정: A11-nc(보호 제거 → N건)만 역증명, B 의 nc 2개는 상수 오작동 배제 **대조군**. 테스트 0개 → **명세 기반 사후검증**(소스 이미 있음, TDD 신규작성 아님). 계획: `~/.claude/plans/drifting-knitting-corbato.md`. 확정 결정: 실 PG(docker-compose.test) / 스키마 소스 **`Base.metadata.create_all`**(계획의 `alembic upgrade head` 는 이 레포 baseline 이 빈 마이그레이션이라 스키마 0개 생성 → 정정. decisions.md 참조) / 매 테스트 **TRUNCATE**(동시성 때문에 tx-rollback 불가) / **negative control 역증명**(결과 1건만으론 순차와 구분불가 → 락 우회 버전이 N건 만드는 걸 동일 하니스로 대조) / CI **ci.yml+deploy 게이트 둘 다** / 도메인 통합 D는 **🔴 4~5개만**. codex 순서 교차검증 시도 → 이 환경서 긴 프롬프트 hang("OK" 11초는 되나 4질문 분석은 5분+ timeout, 3회) → **자체 ultrathink 로 4질문 대체 검증**: 순서 타당하나 ⓪smoke·⑤CI 명시 추가, ASGITransport 동시성은 진짜 경합 성립(진짜 PG+독립세션+gather)이나 negative control 없으면 극장.
 
 **핵심 제약**: 멱등성 미들웨어가 `async_session()` 직접 사용(DI 아님) → dependency_overrides 로 못 바꿈 → conftest 최상단서 `os.environ` 테스트 PG 주입 **후** 앱 import (config/database 가 import 시점 engine 생성). 멱등성 실증 엔드포인트 = `POST /transaction/create`(user→household→membership→account→category factory 필요).
 
@@ -22,7 +22,7 @@
 ## Next Step
 
 1. ~~**⓪ 환경**~~ **완료**(smoke 3/3). ~~**① SCENARIOS.md + factory.py + A 멱등성**~~ **완료**(14 케이스, A1~A12 + A11/A11-nc 대조, 커버리지 92%). codex 교차검증 반영(A11-nc 재설계·A12 4xx 캐싱). 소스 결함 0, 면접 미끼 2개(A10 경로 실체·4xx 캐싱).
-2. **다음: B advisory lock**(`tests/scheduler/` — B1 세션2개 같은 job 1개만 / B2 다른 job 둘 다 / B3 xact 후 재획득 / B4 실패 skip / B5 예외 롤백) → **C fault-injection**(crash window 면접 미끼) → **D 도메인 🔴 4~5개**.
+2. ~~**B advisory lock**~~ **완료**(8 케이스). ~~**C fault-injection**~~ **완료**(3 케이스, `test_crash_window.py`, 계획 `~/.claude/plans/c-dazzling-flamingo.md`). **다음: D 도메인 🔴 4~5개** — 대상 미확정, 각 도메인 공개계약 읽고 확정할 것(후보: D1 ledger running balance 정합 / D2 realized_pnl 백필 로직 / D3 household IDOR / D4 auth 토큰).
 3. **④ RED 분석·수정** → **⑤ CI**(ci.yml + deploy 게이트) → **⑥ 포폴 X 채움**(A11/A11-nc 대조 결과 = "동일 키 동시 N건 → 1건" 실측 확정).
 4. 이후 로드맵 2→3→4→실증. 완성 후: JD + AI 셀프리뷰 3프롬프트 + 면접 대본 — `carrer/interview/`.
 
