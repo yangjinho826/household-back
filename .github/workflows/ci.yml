@@ -4,7 +4,8 @@ name: CI
 # main 에 머지된 뒤 결과물에 대해 한 번 더 돈다. 배포와는 무관하다 — 배포는 태그(deploy.yml).
 on:
   push:
-    branches: [main]
+    # TEMP: 이 브랜치는 CI 배선 검증용 임시 추가 — 검증 끝나면 제거한다
+    branches: [main, docs/portfolio-sre-roadmap]
   pull_request:
 
 permissions:
