@@ -126,7 +126,7 @@ async def create_portfolio(
 async def buy(
     db: AsyncSession, household: Household, item_id: UUID, req: PortfolioBuyRequest,
 ) -> PortfolioResponse:
-    """매수 액션 — qty 누적 + avg_price 재계산 + 이력 기록"""
+    """매수 액션 — 이력 기록 후 거래 replay 로 수량·평단 재계산"""
     item_repo = PortfolioItemRepository(db)
     pt_repo = PortfolioTransactionRepository(db)
 
@@ -151,15 +151,10 @@ async def buy(
     )
     await pt_repo.save(pt_tx)
 
-    # 2. 누적 평균단가 재계산
-    if item.quantity == 0:
-        item.avg_price = req.price
-    else:
-        item.avg_price = (
-            item.quantity * item.avg_price + req.quantity * req.price
-        ) / (item.quantity + req.quantity)
-    item.quantity += req.quantity
-    await db.flush()
+    # 2. 거래 전체 replay 로 수량·평단 재계산.
+    # 입력 순서 기준 누적계산(incremental)이면 과거 날짜 매수를 뒤늦게 넣었을 때
+    # 저장값과 replay 값이 갈린다 — 진실 원천을 replay 하나로 통일한다.
+    await _recalc_item_from_transactions(db, item)
 
     logger.info(
         "매수 (item_id=%s, qty=%s, price=%s, total_qty=%s, avg=%s)",
@@ -213,16 +208,8 @@ async def sell(
     if req.quantity > item.quantity:
         raise CustomException(ErrorCode.BAD_REQUEST)
 
-    # 실현손익 = (매도가 - 매도시점 평단) * 수량. 평단은 차감 전 값 = 직전 누적 이동평균.
-    # 매수/매도 단가 모두 입력값(원화) 그대로 박제 — buy() 와 동일 기준이라 환산 불필요.
-    realized_cost = (item.avg_price * req.quantity).quantize(
-        Decimal("0.01"), rounding=ROUND_HALF_UP,
-    )
-    realized_pnl = (
-        (req.sell_price - item.avg_price) * req.quantity
-    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    # 매도 이력 기록
+    # 매도 이력 기록 — 실현손익은 아래 replay 가 매도시점 평단으로 박제한다.
+    # 매수/매도 단가 모두 입력값(원화) 그대로 저장 — buy() 와 동일 기준이라 환산 불필요.
     pt_tx = PortfolioTransaction(
         household_id=household.id,
         account_id=item.account_id,
@@ -235,25 +222,21 @@ async def sell(
         price=req.sell_price,
         tx_date=req.tx_date or today_kst(),
         memo=req.memo,
-        realized_pnl=realized_pnl,
-        realized_cost_basis=realized_cost,
         data_stat_cd=DataStatus.ACTIVE,
     )
     await pt_repo.save(pt_tx)
 
-    # 보유량 차감
-    remaining = item.quantity - req.quantity
-    if remaining == 0:
-        item.data_stat_cd = DataStatus.DELETED
-        await db.flush()
+    # 거래 전체 replay — 수량·평단 갱신 + 이 매도를 포함한 모든 SELL 실현손익 재박제.
+    # 수량이 0 이 되면 replay 안에서 soft delete 된다(전량 매도).
+    await _recalc_item_from_transactions(db, item)
+
+    if item.quantity == 0:
         logger.info("전량 매도 (item_id=%s, qty=%s)", item.id, req.quantity)
         return None
 
-    item.quantity = remaining
-    await db.flush()
     logger.info(
         "부분 매도 (item_id=%s, sold=%s, remaining=%s)",
-        item.id, req.quantity, remaining,
+        item.id, req.quantity, item.quantity,
     )
 
     accounts = await AccountRepository(db).find_by_ids([item.account_id])

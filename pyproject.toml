@@ -25,5 +25,15 @@ dev = [
     "aiosqlite>=0.22.1",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
     "pytest-mock>=3.14.0",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"           # 모든 async def test_ 자동 인식 (마커 불필요)
+testpaths = ["tests"]
+pythonpath = ["."]              # repo 루트를 sys.path 에 — app 패키지 import
+# 세션 전역 engine 커넥션 풀이 테스트마다 다른 루프에 바인딩돼 깨지는 것 방지 —
+# fixture·test 를 하나의 session 루프로 통일(async 테스트 표준 패턴).
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
