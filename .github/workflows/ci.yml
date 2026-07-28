@@ -1,0 +1,20 @@
+name: CI
+
+# 머지 전 그물. PR 을 열면 돌고, PR 에 커밋을 밀 때마다 다시 돌고,
+# main 에 머지된 뒤 결과물에 대해 한 번 더 돈다. 배포와는 무관하다 — 배포는 태그(deploy.yml).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# 같은 브랜치에 연속으로 push 하면 앞선 실행을 취소한다 — 무료 러너 분 낭비 방지.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
