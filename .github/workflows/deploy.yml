@@ -56,10 +56,20 @@ jobs:
           }
           echo "✅ $GITHUB_SHA ⊂ origin/main"
 
+  # ci.yml 이 PR 에서 부르는 것과 동일한 정의를 호출한다 — 정의가 하나라
+  # "PR 은 초록인데 배포는 다른 테스트" 드리프트가 생길 수 없다.
+  test:
+    needs: guard
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.skip_gates) }}
+    uses: ./.github/workflows/test.yml
+
   build-and-deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
-    needs: guard
+    needs: [guard, test]
+    # skip_gates 로 test 가 건너뛰어졌을 때도 배포는 진행돼야 한다.
+    # 반대로 test 가 '실패'했으면 여기서 멈춘다 (skipped ≠ failed).
+    if: ${{ !failure() && !cancelled() }}
 
     steps:
       - name: Checkout code
