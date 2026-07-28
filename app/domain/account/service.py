@@ -26,6 +26,7 @@ from app.domain.account.schema import (
 )
 from app.domain.account_snapshot.repository import AccountSnapshotRepository
 from app.domain.household.model import Household
+from app.domain.market_price import service as market_price_service
 from app.domain.portfolio.repository import (
     PortfolioItemRepository,
     PortfolioTransactionRepository,
@@ -269,15 +270,22 @@ async def get_account_report(
 
 
 async def _calc_balance(
-    tx_repo: TransactionRepository, account: Account, db: AsyncSession,
+    tx_repo: TransactionRepository,
+    account: Account,
+    db: AsyncSession,
+    as_of: date | None = None,
 ) -> BalanceSummary:
     """통장 balance 계산 — 계좌 타입별 전략으로 위임.
 
     수동자산(부동산·연금·금·적금)도 일반계좌와 동일 공식: start_balance + 거래합(평가조정 포함).
+
+    as_of 를 주면 그 날짜까지의 거래만 반영한 '시점 잔액'. 미지정 시 현재 잔액(전체).
+    월별 스냅샷 박제가 그 달 말일 시점 잔액을 찍을 때 사용한다. 투자 평가액은
+    현재 보유종목 기준이라 시점 박제 순간(=현재)에만 정확하다.
     """
     if account.account_type != AccountType.INVESTMENT:
-        return await _calc_cash_balance(tx_repo, account)
-    return await _calc_investment_balance(tx_repo, account, db)
+        return await _calc_cash_balance(tx_repo, account, as_of)
+    return await _calc_investment_balance(tx_repo, account, db, as_of)
 
 
 def _cash_flow(start_balance: Decimal, sums: dict[str, Decimal]) -> Decimal:
@@ -302,25 +310,47 @@ def _summarize_holdings(items: list) -> tuple[Decimal, Decimal, Decimal, Decimal
 
 
 async def _calc_cash_balance(
-    tx_repo: TransactionRepository, account: Account,
+    tx_repo: TransactionRepository, account: Account, as_of: date | None = None,
 ) -> BalanceSummary:
-    """일반 거래계좌 — 현금흐름 잔액."""
-    sums = await tx_repo.sum_for_account(account.id)
+    """일반 거래계좌 — 현금흐름 잔액. as_of 면 그 날짜까지 시점 잔액."""
+    sums = await tx_repo.sum_for_account(account.id, to_date=as_of)
     return BalanceSummary(balance=_cash_flow(account.start_balance, sums))
 
 
 async def _calc_investment_balance(
-    tx_repo: TransactionRepository, account: Account, db: AsyncSession,
+    tx_repo: TransactionRepository,
+    account: Account,
+    db: AsyncSession,
+    as_of: date | None = None,
 ) -> BalanceSummary:
-    """INVESTMENT 통장 — 현금흐름 + 매매현금 증감 + 보유종목 평가."""
-    sums = await tx_repo.sum_for_account(account.id)
+    """INVESTMENT 통장 — 현금흐름 + 매매현금 증감 + 보유종목 평가.
+
+    as_of 면 거래·매매현금을 그 날짜까지 시점 컷한다. 평가액은 현재 보유종목 기준
+    (과거 가격 이력이 없어 소급 불가 — 박제 순간=현재일 때만 정확).
+    """
+    pt_repo = PortfolioTransactionRepository(db)
+    sums = await tx_repo.sum_for_account(account.id, to_date=as_of)
     cash = _cash_flow(account.start_balance, sums)
 
-    pt_sums = await PortfolioTransactionRepository(db).sum_for_account(account.id)
+    pt_sums = await pt_repo.sum_for_account(account.id, to_date=as_of)
     cash = cash - pt_sums["buy"] + pt_sums["sell"]
 
-    items = await PortfolioItemRepository(db).find_active_by_account_id(account.id)
-    cost, valuation, profit_loss, rate = _summarize_holdings(items)
+    if as_of is not None:
+        # 시점 박제 — 그 시점 보유수량을 '그 달 시가'(market_price_history)로 평가.
+        # 시가 이력 없는 종목(금 과거·수집 실패 등)은 원가 fallback → 회귀 없음.
+        holdings = await pt_repo.asof_holdings_by_account(account.id, as_of)
+        valued = await market_price_service.value_holdings_at_month(
+            db, holdings, as_of.replace(day=1),
+        )
+        cost = sum((h["cost"] for h in holdings), Decimal("0.00"))
+        valuation = sum(
+            (valued[h["item_id"]]["valuation"] for h in holdings), Decimal("0.00"),
+        )
+        profit_loss = valuation - cost
+        rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0.00")
+    else:
+        items = await PortfolioItemRepository(db).find_active_by_account_id(account.id)
+        cost, valuation, profit_loss, rate = _summarize_holdings(items)
 
     return BalanceSummary(
         balance=cash + valuation,

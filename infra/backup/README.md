@@ -101,6 +101,8 @@ docker compose exec postgres psql -U household -d postgres \
 | `rclone lsd r2:...` 실패 | 토큰 권한 (`Object Read & Write`) 또는 버킷 범위 (`household-backup` 한정) 잘못. R2 대시보드에서 토큰 재발급 |
 | `docker compose exec postgres pg_dump` 가 멈춤 | postgres 컨테이너 안 떠있음 — `docker compose ps` 확인 |
 | 다음 날 백업 로그 없음 | `crontab -l` 로 `# household-backup` 라인 확인. 없으면 `install.sh` 재실행 |
+| 배포 이후부터 매 백업 `Permission denied` | 배포의 `git reset --hard` 가 실행비트를 벗김. git 이 스크립트를 100755(exec)로 추적해야 함 — `git update-index --chmod=+x infra/backup/backup-db.sh` 후 커밋. 서버 응급조치는 `chmod +x` (단 다음 배포 전까지만 유효) |
+| 업로드 로그에 `NotImplemented 501` 뒤 `Attempt 2/3 succeeded` | rclone S3 backend 가 R2 미지원 API 를 한 번 찔러보고 재시도 성공하는 노이즈. 백업 자체는 성공(`backup OK` 확인). 무시 가능 |
 | 백업 파일명 날짜가 하루 전 / cron 03:00 이 한국 시각 아님 | 호스트 timezone 이 UTC. `sudo timedatectl set-timezone Asia/Seoul` 또는 `install.sh` 재실행 |
 | R2 비용 알림 메일 옴 | 즉시 `rclone size r2:household-backup` 로 사용량 확인. 30일 retention 안 도는지 점검 |
 

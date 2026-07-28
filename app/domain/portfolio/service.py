@@ -363,10 +363,14 @@ async def get_realized_pnl_by_item(
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
-    from_date, to_date = _default_day_range(from_date, to_date)
-    sells = await PortfolioTransactionRepository(db).find_sell_txs_by_item(
-        item_id, from_date, to_date,
+    tx_repo = PortfolioTransactionRepository(db)
+    earliest = (
+        await tx_repo.earliest_sell_date_by_item(item_id)
+        if from_date is None
+        else None
     )
+    from_date, to_date = _default_day_range(from_date, to_date, earliest)
+    sells = await tx_repo.find_sell_txs_by_item(item_id, from_date, to_date)
 
     rows: list[RealizedPnlRow] = []
     total_realized = Decimal("0.00")
@@ -399,7 +403,12 @@ async def get_realized_pnl_by_item(
         sell_amount=total_sell,
         buy_amount=total_cost,
     )
-    return RealizedPnlResponse(summary=summary, rows=rows)
+    return RealizedPnlResponse(
+        summary=summary,
+        rows=rows,
+        effective_from=from_date,
+        effective_to=to_date,
+    )
 
 
 async def get_realized_pnl_by_account(
@@ -415,8 +424,14 @@ async def get_realized_pnl_by_account(
     여러 종목이 섞이므로 row 에 종목명(name)을 채운다. 기간 미지정 시 최근 12개월.
     구버전 SELL(realized=NULL) 은 0 으로 간주해 합계 왜곡 방지.
     """
-    from_date, to_date = _default_day_range(from_date, to_date)
-    sells = await PortfolioTransactionRepository(db).find_sell_txs_by_account(
+    tx_repo = PortfolioTransactionRepository(db)
+    earliest = (
+        await tx_repo.earliest_sell_date_by_account(account_id, household.id)
+        if from_date is None
+        else None
+    )
+    from_date, to_date = _default_day_range(from_date, to_date, earliest)
+    sells = await tx_repo.find_sell_txs_by_account(
         account_id, household.id, from_date, to_date,
     )
 
@@ -452,7 +467,12 @@ async def get_realized_pnl_by_account(
         sell_amount=total_sell,
         buy_amount=total_cost,
     )
-    return RealizedPnlResponse(summary=summary, rows=rows)
+    return RealizedPnlResponse(
+        summary=summary,
+        rows=rows,
+        effective_from=from_date,
+        effective_to=to_date,
+    )
 
 
 async def get_value_history_by_account(
@@ -777,9 +797,15 @@ def _default_month_range(
 
 
 def _default_day_range(
-    from_date: date | None, to_date: date | None,
+    from_date: date | None,
+    to_date: date | None,
+    earliest_sell: date | None = None,
 ) -> tuple[date, date]:
-    """매매손익 전용 — 일 단위 자유 필터. 월 정규화 없음. 미지정 시 최근 12개월."""
+    """매매손익 전용 — 일 단위 자유 필터. 월 정규화 없음. 미지정 시 최근 12개월.
+
+    from 미지정 + earliest_sell 이 기본 시작일(1년 전)보다 이르면 거기까지 확장한다
+    (기본 '최근 1년' 이 첫 매도를 놓치는 경계 케이스 방지). from 명시 시는 존중.
+    """
     if not to_date:
         to_date = today_kst()
     if not from_date:
@@ -787,6 +813,8 @@ def _default_day_range(
             from_date = to_date.replace(year=to_date.year - 1)
         except ValueError:  # 2/29 → 전년 2/28
             from_date = to_date.replace(year=to_date.year - 1, day=28)
+        if earliest_sell is not None and earliest_sell < from_date:
+            from_date = earliest_sell
     return from_date, to_date
 
 
