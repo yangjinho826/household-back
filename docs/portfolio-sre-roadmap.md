@@ -8,22 +8,21 @@
 
 | 순위 | 작업 | 산출물 (포폴에 채울 것) | 상태 |
 |---|---|---|---|
-| 1 | **테스트 + CI 게이트** | "테스트+백업 2중 게이트", "동일 키 동시 요청 N건 재현 — 비즈니스 레코드 1건·캐시 응답 재사용 검증" | ⬜ |
+| 1 | **테스트 + CI 게이트** | 통합 테스트 49개(멱등성 14+3 / 스케줄러 8 / smoke 3 / 도메인 21) 실 PostgreSQL — 동일 키 동시 2·10발 → 최종 1건 + A11-nc 대조. ci.yml(PR)·deploy.yml(태그)이 test.yml(reusable) 공유 → 테스트+백업 2중 게이트. 포폴 반영 완료 | ✅ 2026-07-27 |
 | 2 | **주간 자동 복구 리허설** | "복구 검증 주 1회 자동", "RTO X분 실측" | ⬜ |
 | 3 | **장애 알림** | "장애 인지: 로그 수동 확인 → 실시간 푸시" | ⬜ |
 | 4 | **migration/rollback playbook** | expand-contract 원칙 문서 (면접 방어) | ⬜ |
 | 실증 | **다중 인스턴스 멱등성 실증 1회** | "앱 인스턴스 2개가 동일 PostgreSQL 공유 환경에서 동일 키 경합 시 중복 생성 0건" | ⬜ |
 | 옵션 | 용량 한계 실측 / 멱등성 오버헤드 실측 / 무중단 배포 | "1vCPU 기준 p95/5xx 꺾이는 지점 → 운영 기준선 산정" | ⬜ |
 
-## 1. 테스트 + CI 게이트
+## 1. 테스트 + CI 게이트 — ✅ 완료 (2026-07-27)
 
-- **실 PostgreSQL 필수** — SQLite/mock 으로 advisory lock·idempotency 동시성 테스트는 무효 (codex: "장난감 테스트"). CI 에 postgres service 붙일 것.
-- 테스트 목록:
-  - 멱등성 동시 요청: `httpx.AsyncClient + ASGITransport` + `asyncio.gather` 동시 N발 (같은 user/key/body) → 도메인 레코드 1건 + 캐시 응답 재사용 검증. ASGITransport in-process 여도 `ON CONFLICT` INSERT 가 await 지점이라 경합 실제 성립 (codex 확인).
-  - advisory lock 경쟁: 세션 2개가 같은 잡 이름으로 `pg_try_advisory_xact_lock` 경쟁 → 1개만 획득.
-  - (선택) fault-injection: 비즈니스 커밋 후 `mark_completed` 전 예외 주입 → 재시도 결과 확인. 면접 역공 카드.
-  - 기본 통합 테스트 (도메인 핵심 경로) — 테스트 0개 상태가 최대 구멍.
-- `deploy.yml` 에 테스트 job 추가 — 실패 시 배포 중단 (백업 게이트와 2중).
+- **실 PostgreSQL 필수** — SQLite/mock 으로 advisory lock·idempotency 동시성 테스트는 무효 (codex: "장난감 테스트"). 로컬(tmpfs 컨테이너)·CI(service 컨테이너) 모두 같은 이미지·포트로 구성 완료.
+- 구현된 테스트 (49개, `tests/SCENARIOS.md` 가 정본):
+  - A 멱등성 14 + C fault-injection 3: 동시 2·10발 → 최종 1건, A11-nc(보호 제거 → N건) 역증명 포함. crash window(C1)·TTL 재시도 2건(C3) 실측 — 면접 미끼 재료.
+  - B advisory lock 8: `pg_backend_pid()` 상이 단언 + B6 동시 `run_locked_job` 경합.
+  - D 도메인 21: D1 원장 / D2 실현손익(소스 결함 1건 수정) / D3 격리 / D4 수량·전이.
+- CI 게이트: `test.yml`(reusable) 하나를 `ci.yml`(push/PR)과 `deploy.yml`(태그, needs:test)이 공유 — 게이트 드리프트 구조적 차단 + 백업 게이트와 2중.
 
 ## 2. 주간 자동 복구 리허설
 
@@ -54,4 +53,6 @@
 | crash window 포폴 표기 | 안 씀 (면접 미끼) | 룰 미끼 전략 — 답은 면접 대본에서 준비 |
 | advisory lock | 독립 카드 ❌ → 보조 | Monew Jenkins 대비 규모·난도 낮게 보임. "같은 문제·다른 제약·다른 선택" 프레임만 |
 | 무중단 배포 | 후순위 | 복잡도 대비 신뢰성 리스크 (codex ROI 낮음) |
-| 숫자 | 마이그레이션 **22개** (23 아님 — `__pycache__` 오카운트), 도메인 17, 태그 배포 18회, 잡 5개, AI 로그 183건 | 전부 git/코드 검증값 |
+| 숫자 | 마이그레이션 **24** · 도메인 **17** · 태그 배포 **19** · 통합 테스트 **49** · 잡 5개 · AI 로그 183건 (2026-07-30 재검증) | 전부 git/코드 검증값 — 제출 직전 재검증 커맨드는 포폴 작성 노트 참조 |
+| 백필 사고 카드 | 포폴에서 제거 — 면접 재료로만 보존 | 투자 도메인(평단·replay) 설명 비용이 기술 가치를 가림 (2026-07-30, 사용자 판단) |
+| 메인 카드 구성 | 배포·멱등성·백업·알림관측 → **멱등성·테스트+CI·배포·백업** (2026-07-30 확정) | 알림관측은 미구현이라 제외 — 로드맵 3번 구현 후 재추가. 정본: `carrer/portfolio/household-back.md` |
