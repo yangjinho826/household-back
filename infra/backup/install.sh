@@ -2,7 +2,7 @@
 # 백업 셋업 1회 실행 스크립트.
 # - rclone 미설치면 설치
 # - .env 의 R2_* 자격증명으로 ~/.config/rclone/rclone.conf 생성
-# - cron 에 매일 03:00 KST 백업 등록 (이미 있으면 갱신)
+# - cron 에 매일 03:00 KST 백업 + 04:00 KST 복구 리허설 등록 (이미 있으면 갱신)
 #
 # 실행: cd household-back && bash infra/backup/install.sh
 set -euo pipefail
@@ -10,7 +10,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BACKUP_SCRIPT="$SCRIPT_DIR/backup-db.sh"
+DRILL_SCRIPT="$SCRIPT_DIR/restore-drill.sh"
 LOG_FILE="/var/log/household-backup.log"
+DRILL_LOG="/var/log/household-restore-drill.log"
 
 # 1. .env 검증
 if [[ ! -f "$PROJECT_DIR/.env" ]]; then
@@ -69,16 +71,25 @@ fi
 echo "[install] R2 연결 OK"
 
 # 5. 로그 파일 권한
-sudo touch "$LOG_FILE"
-sudo chown "$USER" "$LOG_FILE"
+for f in "$LOG_FILE" "$DRILL_LOG"; do
+  sudo touch "$f"
+  sudo chown "$USER" "$f"
+done
 
-# 6. cron 등록 (기존 household-backup 라인 제거 후 재등록)
-CRON_LINE="0 3 * * * $BACKUP_SCRIPT >> $LOG_FILE 2>&1 # household-backup"
-{ crontab -l 2>/dev/null | grep -v "# household-backup" || true; echo "$CRON_LINE"; } | crontab -
-echo "[install] cron 등록 완료 — 매일 03:00 KST 백업"
+# 6. cron 등록 (기존 라인 제거 후 재등록 — 재실행해도 중복 안 쌓임)
+# 리허설은 백업 1시간 뒤 — 그날 03:00 업로드가 끝난 최신본을 대상으로 돌아야 한다.
+BACKUP_CRON="0 3 * * * $BACKUP_SCRIPT >> $LOG_FILE 2>&1 # household-backup"
+DRILL_CRON="0 4 * * * $DRILL_SCRIPT >> $DRILL_LOG 2>&1 # household-restore-drill"
+{
+  crontab -l 2>/dev/null | grep -v -e "# household-backup" -e "# household-restore-drill" || true
+  echo "$BACKUP_CRON"
+  echo "$DRILL_CRON"
+} | crontab -
+echo "[install] cron 등록 완료 — 03:00 백업 / 04:00 복구 리허설 (KST)"
 
-chmod +x "$BACKUP_SCRIPT"
+chmod +x "$BACKUP_SCRIPT" "$DRILL_SCRIPT"
 
 echo
 echo "셋업 완료. 다음으로 수동 1회 실행해서 검증:"
-echo "  bash $BACKUP_SCRIPT"
+echo "  bash $BACKUP_SCRIPT      # 백업"
+echo "  bash $DRILL_SCRIPT       # 복구 리허설 — RTO 숫자가 여기서 나온다"
