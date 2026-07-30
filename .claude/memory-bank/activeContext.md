@@ -6,7 +6,7 @@
 
 ## Status
 
-**로드맵 1번 A~D 완결 (2026-07-27) — 전체 49 passed(멱등성 14+3 / 스케줄러 8 / smoke 3 / 도메인 21), 멱등성 97% · 락 로직 100%. 다음 ④ CI 2중 게이트(ci.yml + deploy).**
+**로드맵 1번 전체 완결 (2026-07-28) — 테스트 49 passed(멱등성 14+3 / 스케줄러 8 / smoke 3 / 도메인 21, 멱등성 97% · 락 로직 100%) + CI 게이트(test.yml reusable 을 ci.yml·deploy.yml 이 공유, 백업 게이트와 2중). 2026-07-30 포폴 카드 4장 확정: 멱등성 / 테스트+CI / 배포 안전망 / 복구되는 백업 (+보조 2: advisory lock·AI 추적). 백필 카드는 도메인 설명 비용으로 제거 — 면접 재료로만 보존. 다음 = 로드맵 2번(주간 복구 리허설 + RTO 실측).**
 
 **D 종합 (도메인 21 케이스)**: D1 원장 running balance 5(GREEN) / D1-6 깨진 커서 3(⚪ 의도된 한계) / **D2 실현손익 4(RED 2 → 소스 결함 1건 수정)** / D3 가계부 격리 5(GREEN) / D4 수량·상태 전이 4(GREEN). **D2 만 갈린 이유** — D1·D2 는 똑같이 "값을 두 곳에서 계산"하는 구조인데 D1 은 두 경로의 순서·규칙이 일치했고 D2 는 입력 순서 vs `tx_date asc` 로 갈렸다. 구조가 아니라 **두 경로가 같은 순서·같은 규칙을 보는가**가 결함을 가른다(면접 카드). **D4-2 가 D2 수정의 개선을 박제** — 수정 전엔 전량매도 시 `quantity` 가 마지막 보유량으로 남았고(운영 DB 점검서 25·101·115주 화석 확인), 이제 replay 가 0 까지 맞춘다. **D1-6c 면접 미끼**: 커서에 carry 를 실으면 클라이언트가 잔액 기준점을 통제 — 숫자로 파싱만 되면 서버가 검증 없이 쓴다. read-only 라 피해는 자기 화면뿐이고, 고치려면 매 페이지 재계산(성능) 또는 커서 HMAC 이라 이 규모엔 과함(C 와 같은 "수정 비용이 방어 논리를 가른다").
 
@@ -22,14 +22,13 @@
 
 - **로드맵 순서**: 1 테스트+CI 게이트(실 PostgreSQL 필수, 멱등성 asyncio.gather 동시 N발 + advisory lock 경쟁 + 선택 fault-injection) → 2 주간 자동 복구 리허설(RTO 실측) → 3 장애 알림(잡/백업/배포/헬스체크 webhook) → 4 migration playbook(expand-contract) → 실증: compose 앱 2개 다중 인스턴스 멱등성. 옵션: 용량 한계 실측·오버헤드·무중단 배포. 상세·확정 판단 표는 `docs/portfolio-sre-roadmap.md`.
 - **핵심 제약 (재논의 X)**: k6 절대 처리량 폐기 / 멀티스레드 클라이언트 무의미(단일 이벤트 루프) / 멱등성 주장은 "동시 in-flight 중복 방지"까지 — crash window(비즈니스 커밋 후 COMPLETED 전 죽음)는 포폴에 안 쓰고 면접 미끼 / "exactly-once·무장애" 표현 금지.
-- 현재 테스트 0개 (main에도 없음) — 이게 최대 구멍이라 1순위.
 - 브랜치: `docs/portfolio-sre-roadmap`.
 
 ## Next Step
 
-1. ~~**⓪ 환경**~~ **완료**(smoke 3/3). ~~**① SCENARIOS.md + factory.py + A 멱등성**~~ **완료**(14 케이스, A1~A12 + A11/A11-nc 대조, 커버리지 92%). codex 교차검증 반영(A11-nc 재설계·A12 4xx 캐싱). 소스 결함 0, 면접 미끼 2개(A10 경로 실체·4xx 캐싱).
-2. ~~**B advisory lock**~~ **완료**(8 케이스). ~~**C fault-injection**~~ **완료**(3 케이스, `test_crash_window.py`, 계획 `~/.claude/plans/c-dazzling-flamingo.md`). ~~**D2 realized_pnl**~~ **완료**(4 케이스, 결함 1건 수정). ~~**D1 ledger running balance**~~ **완료**(5, 계획 `~/.claude/plans/d1-snug-newt.md`). ~~**D 잔여**~~ **완료**(D4 4 / D1-6 3 / D3 5). **D 전체 완결 — 도메인 21 케이스.** **다음: ④ CI 2중 게이트** — `ci.yml`(push/PR) + `deploy.yml` 테스트 게이트. 49 passed 를 배포 조건으로 걸어 백업 게이트와 2중화.
-3. **④ RED 분석·수정** → **⑤ CI**(ci.yml + deploy 게이트) → **⑥ 포폴 X 채움**(A11/A11-nc 대조 결과 = "동일 키 동시 N건 → 1건" 실측 확정).
-4. 이후 로드맵 2→3→4→실증. 완성 후: JD + AI 셀프리뷰 3프롬프트 + 면접 대본 — `carrer/interview/`.
+1. ~~**로드맵 1번 전체**~~ **완료** — 테스트 49(⓪ smoke / A 멱등성 14 / B advisory lock 8 / C fault-injection 3 / D 도메인 21) + CI 게이트(ci.yml·deploy.yml → test.yml reusable 공유) + 포폴 실측값 반영. 상세 이력은 Status 참조.
+2. ~~**포폴 카드 확정**~~ **완료** (2026-07-30) — 4장 + 보조 2장, 백필 제거. 정본 `carrer/portfolio/household-back.md`, 이력서 블록 `carrer/resume/household-이력서-블록.md`.
+3. **다음: 로드맵 2번 — 주간 자동 복구 리허설** (cron 주 1회: daily 백업 → 임시 DB restore → 검증 → drop, RTO 실측). 이후 3번 장애 알림 → 4번 migration playbook → 다중 인스턴스 실증. 각 구현·실측 후 포폴에 해당 문장 재추가.
+4. carrer 쪽 남은 것: 면접 대본(포폴 미끼 답변 — crash window / 복구 리허설 1회 / guard 한계 / "백업 수동 개입 0회를 어떻게 확인했나") + JD 생기면 AI 셀프리뷰 3프롬프트.
 
 **노션 누적 정리 규칙**: phase1 각 단계 완료 시 다시 지시 없어도 노션 "Phase 1 진행기록"(https://app.notion.com/p/3a7a6161032981bd8f8bf4f4196584ac) 에 `## NN.` 섹션 이어붙임. 규칙 상세는 harness 메모리 `phase1-notion-worklog`.

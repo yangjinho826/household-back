@@ -26,6 +26,8 @@ DUMP="/tmp/household-${TS}.sql.gz"
 DEST="r2:${BUCKET}/daily"
 
 # 컨테이너 안의 pg_dump 사용 — 호스트에 postgres-client 별도 설치 불필요.
+# -C/--create 를 붙이지 말 것 — 덤프 앞에 \connect 가 들어가고, restore-drill.sh 가 임시 DB 에
+# 부을 때 psql 세션이 운영 DB 로 옮겨가 DDL/COPY 가 전부 운영에 떨어진다.
 docker compose exec -T postgres pg_dump -U "$PG_USER" -d "$PG_DB" | gzip > "$DUMP"
 
 rclone copy "$DUMP" "${DEST}/" --quiet

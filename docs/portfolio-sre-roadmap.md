@@ -8,28 +8,30 @@
 
 | 순위 | 작업 | 산출물 (포폴에 채울 것) | 상태 |
 |---|---|---|---|
-| 1 | **테스트 + CI 게이트** | "테스트+백업 2중 게이트", "동일 키 동시 요청 N건 재현 — 비즈니스 레코드 1건·캐시 응답 재사용 검증" | ⬜ |
-| 2 | **주간 자동 복구 리허설** | "복구 검증 주 1회 자동", "RTO X분 실측" | ⬜ |
+| 1 | **테스트 + CI 게이트** | 통합 테스트 49개(멱등성 14+3 / 스케줄러 8 / smoke 3 / 도메인 21) 실 PostgreSQL — 동일 키 동시 2·10발 → 최종 1건 + A11-nc 대조. ci.yml(PR)·deploy.yml(태그)이 test.yml(reusable) 공유 → 테스트+백업 2중 게이트. 포폴 반영 완료 | ✅ 2026-07-27 |
+| 2 | **자동 복구 리허설** | "복구 검증 매일 자동", "RTO X초 실측" | 🟡 스크립트·cron 구현 완료, 운영 실행/실측 대기 |
 | 3 | **장애 알림** | "장애 인지: 로그 수동 확인 → 실시간 푸시" | ⬜ |
 | 4 | **migration/rollback playbook** | expand-contract 원칙 문서 (면접 방어) | ⬜ |
 | 실증 | **다중 인스턴스 멱등성 실증 1회** | "앱 인스턴스 2개가 동일 PostgreSQL 공유 환경에서 동일 키 경합 시 중복 생성 0건" | ⬜ |
 | 옵션 | 용량 한계 실측 / 멱등성 오버헤드 실측 / 무중단 배포 | "1vCPU 기준 p95/5xx 꺾이는 지점 → 운영 기준선 산정" | ⬜ |
 
-## 1. 테스트 + CI 게이트
+## 1. 테스트 + CI 게이트 — ✅ 완료 (2026-07-27)
 
-- **실 PostgreSQL 필수** — SQLite/mock 으로 advisory lock·idempotency 동시성 테스트는 무효 (codex: "장난감 테스트"). CI 에 postgres service 붙일 것.
-- 테스트 목록:
-  - 멱등성 동시 요청: `httpx.AsyncClient + ASGITransport` + `asyncio.gather` 동시 N발 (같은 user/key/body) → 도메인 레코드 1건 + 캐시 응답 재사용 검증. ASGITransport in-process 여도 `ON CONFLICT` INSERT 가 await 지점이라 경합 실제 성립 (codex 확인).
-  - advisory lock 경쟁: 세션 2개가 같은 잡 이름으로 `pg_try_advisory_xact_lock` 경쟁 → 1개만 획득.
-  - (선택) fault-injection: 비즈니스 커밋 후 `mark_completed` 전 예외 주입 → 재시도 결과 확인. 면접 역공 카드.
-  - 기본 통합 테스트 (도메인 핵심 경로) — 테스트 0개 상태가 최대 구멍.
-- `deploy.yml` 에 테스트 job 추가 — 실패 시 배포 중단 (백업 게이트와 2중).
+- **실 PostgreSQL 필수** — SQLite/mock 으로 advisory lock·idempotency 동시성 테스트는 무효 (codex: "장난감 테스트"). 로컬(tmpfs 컨테이너)·CI(service 컨테이너) 모두 같은 이미지·포트로 구성 완료.
+- 구현된 테스트 (49개, `tests/SCENARIOS.md` 가 정본):
+  - A 멱등성 14 + C fault-injection 3: 동시 2·10발 → 최종 1건, A11-nc(보호 제거 → N건) 역증명 포함. crash window(C1)·TTL 재시도 2건(C3) 실측 — 면접 미끼 재료.
+  - B advisory lock 8: `pg_backend_pid()` 상이 단언 + B6 동시 `run_locked_job` 경합.
+  - D 도메인 21: D1 원장 / D2 실현손익(소스 결함 1건 수정) / D3 격리 / D4 수량·전이.
+- CI 게이트: `test.yml`(reusable) 하나를 `ci.yml`(push/PR)과 `deploy.yml`(태그, needs:test)이 공유 — 게이트 드리프트 구조적 차단 + 백업 게이트와 2중.
 
-## 2. 주간 자동 복구 리허설
+## 2. 자동 복구 리허설
 
-- cron (주 1회): 최신 daily 백업 → 임시 DB restore → 테이블 목록·행수·체크섬 검증 → 결과 알림(3번 연동) → 임시 DB drop.
-- 소요 시간 기록 → **RTO 실측값**. 실패 시 알림 필수.
-- 기존 문서: `infra/backup/README.md` 의 수동 복구 절차를 자동화하는 것.
+- **주 1회 → 매일 04:00 로 변경** (백업 03:00 직후). 발견 지연이 7일 → 1일로 줄고 기록도 30배 빨리 쌓인다. `DROP DATABASE` 가 파일을 실제로 지우니 매일 돌려도 볼륨 bloat 없음.
+- `infra/backup/restore-drill.sh`: 최신 daily 백업 → 임시 DB restore → 검증 → drop. 소요 시간 = **RTO 실측값**.
+- 검증 항목: 백업 신선도(26시간) / gzip 종료코드 / `psql ON_ERROR_STOP` / 테이블 10개 이상 / `users` 행 존재 / **`users.name` 한글 행 존재(UTF8 손상 탐지)**. 체크섬은 채택 안 함 — 덤프는 매일 내용이 달라 고정 기대값이 없고, 위 항목이 "복구 가능"을 더 직접 증명.
+- 운영 DB 는 건드리지 않는다. `infra/backup/README.md` 복구 절차의 1~3단계(받기→임시 DB→검증)만 자동화하고, 운영 DB 를 갈아끼우는 swap 단계는 제외.
+- **알림은 3번에 의존** — 지금은 `/var/log/household-restore-drill.log` 에만 쌓이고 실패해도 조용하다. 이게 3번의 이벤트 목록에 "복구 리허설 실패"가 들어있는 이유.
+- 남은 것: 운영 호스트에서 1회 실행해 RTO 확보(1vCPU 실측 — 로컬 시간은 RTO 아님) → `install.sh` 재실행으로 cron 등록 → 포폴 문장 재추가.
 
 ## 3. 장애 알림
 
@@ -54,4 +56,6 @@
 | crash window 포폴 표기 | 안 씀 (면접 미끼) | 룰 미끼 전략 — 답은 면접 대본에서 준비 |
 | advisory lock | 독립 카드 ❌ → 보조 | Monew Jenkins 대비 규모·난도 낮게 보임. "같은 문제·다른 제약·다른 선택" 프레임만 |
 | 무중단 배포 | 후순위 | 복잡도 대비 신뢰성 리스크 (codex ROI 낮음) |
-| 숫자 | 마이그레이션 **22개** (23 아님 — `__pycache__` 오카운트), 도메인 17, 태그 배포 18회, 잡 5개, AI 로그 183건 | 전부 git/코드 검증값 |
+| 숫자 | 마이그레이션 **24** · 도메인 **17** · 태그 배포 **19** · 통합 테스트 **49** · 잡 5개 · AI 로그 183건 (2026-07-30 재검증) | 전부 git/코드 검증값 — 제출 직전 재검증 커맨드는 포폴 작성 노트 참조 |
+| 백필 사고 카드 | 포폴에서 제거 — 면접 재료로만 보존 | 투자 도메인(평단·replay) 설명 비용이 기술 가치를 가림 (2026-07-30, 사용자 판단) |
+| 메인 카드 구성 | 배포·멱등성·백업·알림관측 → **멱등성·테스트+CI·배포·백업** (2026-07-30 확정) | 알림관측은 미구현이라 제외 — 로드맵 3번 구현 후 재추가. 정본: `carrer/portfolio/household-back.md` |
