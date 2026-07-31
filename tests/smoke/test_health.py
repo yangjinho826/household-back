@@ -19,6 +19,13 @@ async def test_health_200(client: AsyncClient):
     assert response.status_code == 200
 
 
+async def test_health_HEAD_200(client: AsyncClient):
+    # 외부 uptime 모니터가 HEAD 로 찌른다 — 405 면 영구 down 오탐 (라우트에 HEAD 명시 필요)
+    response = await client.head("/health")
+
+    assert response.status_code == 200
+
+
 async def test_db_왕복(db):
     # 앱 engine/세션이 테스트 PG 로 실제 쿼리를 왕복하는지 (2번째 테스트 = 루프 재사용 검증)
     result = await db.execute(text("SELECT 1"))
