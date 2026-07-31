@@ -37,7 +37,7 @@
 
 ## 3. 장애 알림 — ✅ 완료 (2026-07-31, 운영 검증 포함)
 
-**운영 검증 실측 (2026-07-31)**: webhook 발송 테스트 수신 / HC ping 수신(backup "15 seconds ago") / 고의 `/fail` → Discord DOWN 알림 수신 (up→down **전이 시에만** 알림이 가는 것도 이때 확인 — down 상태서 통합 연결하면 조용함) / v0.10.1 배포로 register-cron 자가복구 첫 실행 + notify job 정상 skip / UptimeRobot 모니터 Up. **계획 대비 변경 2건**: ① UptimeRobot free 가 Discord 연동·메서드 변경을 잠금 → 서버 다운 알림만 E-mail (알림 채널 자체의 단일 장애점 회피로 정리) ② UptimeRobot 이 HEAD 고정인데 FastAPI 는 GET 라우트에 HEAD 미지원(운영 실측 405) → `/health` 에 HEAD 명시(v0.10.2)로 해결 — 메서드 잠금이 무의미해짐.
+**운영 검증 실측 (2026-07-31)**: webhook 발송 테스트 수신 / HC ping 수신(backup "15 seconds ago") / 고의 `/fail` → Discord DOWN 알림 수신 (up→down **전이 시에만** 알림이 가는 것도 이때 확인 — down 상태서 통합 연결하면 조용함) / v0.10.1 배포로 register-cron 자가복구 첫 실행 + notify job 정상 skip / UptimeRobot 모니터 Up. **계획 대비 변경 3건**: ① UptimeRobot free 가 Discord 연동·메서드 변경을 잠금 → 서버 다운 알림만 E-mail (알림 채널 자체의 단일 장애점 회피로 정리) ② UptimeRobot 이 HEAD 고정인데 FastAPI 는 GET 라우트에 HEAD 미지원(운영 실측 405) → `/health` 에 HEAD 명시(v0.10.2)로 해결 ③ **외부 감시가 자체 보안 정책과 충돌** — Cloudflare "Allow Korea Only" 국가 차단 룰이 UptimeRobot 미국발 체크를 403 으로 튕겨 영구 down 오탐 (Security Events 로 룰 특정). 해결: `/api/health` 경로만 skip 규칙(`allow-health-monitor`, 첫 번째 순서)으로 최소 개방 — 헬스 응답은 상태값뿐이라 노출 없음. "감시 주체를 밖에 두면 방화벽 정책과의 충돌은 필연"이라는 교훈.
 
 **설계 원칙 — 서버 발신 알림은 서버가 죽으면 못 나간다.** 그래서 "실패 시 push"가 아니라 감시 주체를 실패 유형별로 나눈다: 앱이 살아있는 실패는 앱이 직접 Discord 로, cron·서버 생존은 서버 밖(무료 SaaS 2종)이 침묵을 감지한다. 풀 모니터링 스택(Prometheus+Grafana)은 1vCPU/1GB 대비 과함 + Monew 포폴과 겹쳐 기각, Uptime Kuma 자체 호스팅은 같은 서버면 자기 죽음을 못 잡는 모순, GH Actions schedule 폴링은 지연 5~60분 + 60일 비활성 자동 꺼짐으로 기각.
 
