@@ -135,6 +135,12 @@ jobs:
             # 서버 작업 트리는 main 을 그대로 따라가는 read-only 미러.
             # 누가 파일을 직접 고쳐 pull 이 충돌나는 걸 막으려고 강제로 main 에 맞춘다.
             git fetch origin main && git reset --hard origin/main
+
+            # cron 자가복구 — 크론탭 유실(서버 교체·crontab -r 실수)을 매 배포마다 재등록으로
+            # 예방한다. 멱등이라 반복 실행 안전. 배포 없는 기간의 유실은 Healthchecks.io
+            # (성공 ping 끊김 감지)가 잡는다 — 예방과 감지의 커버 구간이 달라 둘 다 있다.
+            bash infra/backup/register-cron.sh
+
             docker compose pull app
 
             # compose 가 rename 도중 이탈해서 남은 stuck 컨테이너 정리.
@@ -152,3 +158,28 @@ jobs:
 
       - name: Verify deployment
         run: echo "✅ Backend deployed — image ${{ env.GHCR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
+
+  # 배포 실패 알림 — 어느 job 이 죽든 Discord 로 즉시. 성공 알림은 안 보낸다
+  # (태그 push 는 본인이 직접 하는 행위라 성공은 노이즈, 침묵-실패만 문제).
+  notify-failure:
+    name: Notify deploy failure
+    runs-on: ubuntu-latest
+    needs: [guard, test, build-and-deploy]
+    if: failure()
+
+    steps:
+      - name: Discord 알림
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # 태그명은 curl 본문에 들어가므로 env 경유 — 인라인 치환은 인젝션 여지
+          REF_NAME: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # secret 미설정이면 skip — curl 실패로 notify job 자체가 빨간 X 노이즈가 되는 것 방지
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL secret 미설정 — 배포 실패 알림 생략"
+            exit 0
+          fi
+          jq -n --arg c "🚨 household | 배포 실패: ${REF_NAME} — ${RUN_URL}" '{content: $c}' \
+            | curl -fsS -m 10 --retry 3 -H 'Content-Type: application/json' -d @- "$DISCORD_WEBHOOK_URL" \
+            || echo "::warning::Discord 알림 발송 실패"
