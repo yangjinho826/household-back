@@ -6,10 +6,11 @@ household PostgreSQL DB 를 매일 03:00 KST 에 Cloudflare R2 로 백업한다.
 
 | 파일 | 역할 |
 |---|---|
-| `backup-db.sh` | pg_dump → gzip → R2 업로드 → 30일 retention 적용 |
-| `restore-drill.sh` | 매일 04:00 복구 리허설 — 최신 백업을 임시 DB 에 복구·검증하고 RTO 기록 |
+| `backup-db.sh` | pg_dump → gzip → R2 업로드 → 30일 retention 적용. 성공/실패를 Healthchecks.io 에 ping |
+| `restore-drill.sh` | 매일 04:00 복구 리허설 — 최신 백업을 임시 DB 에 복구·검증하고 RTO 기록. 성공/실패 ping |
 | `rclone.conf.template` | R2 자격증명 주입용 rclone 설정 템플릿 |
-| `install.sh` | rclone 설치 + config 생성 + cron 2개 등록 (1회 실행) |
+| `register-cron.sh` | cron 2개 등록 (멱등, sudo 불필요) — install.sh 와 deploy.yml 이 공유. 배포마다 재등록해 크론탭 유실을 자가복구 |
+| `install.sh` | rclone 설치 + config 생성 + register-cron.sh 호출 (1회 실행) |
 
 ## 최초 셋업
 
@@ -49,7 +50,8 @@ bash infra/backup/install.sh
 - `~/.config/rclone/rclone.conf` 자동 생성 (퍼미션 600)
 - R2 연결 테스트 (`rclone lsd r2:household-backup`)
 - `/var/log/household-backup.log` 권한 셋업
-- cron 등록 (`0 3 * * *` 매일 03:00 KST)
+- cron 등록 — `register-cron.sh` 호출 (03:00 백업 / 04:00 리허설, KST)
+- `HC_PING_URL_*` 미설정 시 경고 (아래 "장애 알림" 섹션)
 
 ### 3. 수동 1회 실행 (검증)
 
@@ -117,13 +119,49 @@ tail -5 /var/log/household-restore-drill.log
 
 `RTO=41s` = R2 다운로드부터 검증 완료까지 실측 소요 시간. 임시 DB drop 은 복구 시간이 아니라 제외.
 
-실패 시 `drill FAILED: <이유>` 한 줄 + exit 1. **알림은 아직 없다** — 로그만 쌓이므로 직접 확인해야 한다 (장애 알림은 `docs/portfolio-sre-roadmap.md` 3번).
+실패 시 `drill FAILED: <이유>` 한 줄 + exit 1 + Healthchecks.io 로 `/fail` ping (사유 포함) — HC 의 Discord 연동이 즉시 푸시한다. 아래 "장애 알림" 섹션 참고.
 
 ### 수동 실행
 
 ```bash
 bash infra/backup/restore-drill.sh     # cron 안 기다리고 바로 RTO 확인
 ```
+
+## 장애 알림 (Healthchecks.io — dead man's switch)
+
+"실패하면 알림을 쏜다"만으로는 부족하다 — **cron 자체가 멈추거나 서버가 죽으면 알림을 쏠 주체도 같이 죽는다.** 그래서 방향을 뒤집는다: 스크립트는 성공할 때마다 Healthchecks.io 에 ping 을 보내고, "매일 오던 ping 이 끊겼다"는 판정을 서버 밖(HC)이 내린다. 실패 시 `/fail` ping(사유 포함)은 grace 를 기다리지 않고 즉시 알리는 보너스.
+
+### 신호 두 종류
+
+| 상황 | 신호 | 알림 시점 |
+|---|---|---|
+| 스크립트가 돌다가 실패 | `/fail` ping (사유 body) | 즉시 |
+| 스크립트가 아예 안 돎 (cron 유실·서버 다운) | 침묵 — 성공 ping 부재를 HC 가 감지 | grace 초과 시 (최대 하루 안) |
+
+### Healthchecks.io 설정 (1회)
+
+1. https://healthchecks.io 가입 (free — 체크 20개까지) → 체크 2개 생성:
+
+| 체크 | Schedule (cron) | Timezone | Grace |
+|---|---|---|---|
+| `household-backup` | `0 3 * * *` | `Asia/Seoul` | 1 hour |
+| `household-restore-drill` | `0 4 * * *` | `Asia/Seoul` | 1 hour |
+
+2. Integrations → Discord 연결 (알림 채널 지정)
+3. 각 체크의 ping URL 을 서버 `.env` 에 추가:
+
+```bash
+HC_PING_URL_BACKUP=https://hc-ping.com/<uuid-1>
+HC_PING_URL_DRILL=https://hc-ping.com/<uuid-2>
+```
+
+미설정이면 ping 만 조용히 생략된다 — 백업/리허설 동작에는 영향 없음 (`install.sh` 가 경고만 출력).
+
+### cron 자가복구 (예방)
+
+배포(`deploy.yml`)가 SSH step 에서 `register-cron.sh` 를 매번 실행해 크론탭 유실을 자가복구한다. HC 감지와 보완 관계 — 예방은 배포 시점, 감지는 배포 없는 기간을 커버.
+
+앱 레벨 알림(스케줄 잡 실패·5xx → Discord 직접)과 서버 생존 감시(UptimeRobot `/health` 폴링)까지 포함한 전체 그림은 `docs/portfolio-sre-roadmap.md` 3번 참고.
 
 ## 로그 확인
 
@@ -142,7 +180,7 @@ bash infra/backup/restore-drill.sh     # cron 안 기다리고 바로 RTO 확인
 | `install.sh` 가 `R2_ACCOUNT_ID 누락` 으로 종료 | `.env` 에 4개 변수 모두 채웠는지 확인 |
 | `rclone lsd r2:...` 실패 | 토큰 권한 (`Object Read & Write`) 또는 버킷 범위 (`household-backup` 한정) 잘못. R2 대시보드에서 토큰 재발급 |
 | `docker compose exec postgres pg_dump` 가 멈춤 | postgres 컨테이너 안 떠있음 — `docker compose ps` 확인 |
-| 다음 날 백업 로그 없음 | `crontab -l` 로 `# household-backup` 라인 확인. 없으면 `install.sh` 재실행 |
+| 다음 날 백업 로그 없음 | `crontab -l` 로 `# household-backup` 라인 확인. 없으면 `register-cron.sh` 실행 (배포가 돌면 자동 재등록됨). HC 가 "ping 끊김"으로 하루 안에 알려주는 케이스 |
 | 배포 이후부터 `Permission denied` (백업 또는 리허설) | 배포의 `git reset --hard` 가 실행비트를 벗김. git 이 스크립트를 100755(exec)로 추적해야 함 — `git update-index --chmod=+x infra/backup/backup-db.sh infra/backup/restore-drill.sh` 후 커밋. 서버 응급조치는 `chmod +x` (단 다음 배포 전까지만 유효). Windows 는 `core.filemode=false` 라 로컬 파일 권한만으론 안 담긴다 |
 | 업로드 로그에 `NotImplemented 501` 뒤 `Attempt 2/3 succeeded` | rclone S3 backend 가 R2 미지원 API 를 한 번 찔러보고 재시도 성공하는 노이즈. 백업 자체는 성공(`backup OK` 확인). 무시 가능 |
 | 백업 파일명 날짜가 하루 전 / cron 03:00 이 한국 시각 아님 | 호스트 timezone 이 UTC. `sudo timedatectl set-timezone Asia/Seoul` 또는 `install.sh` 재실행 |
@@ -156,7 +194,7 @@ bash infra/backup/restore-drill.sh     # cron 안 기다리고 바로 RTO 확인
 
 ## 변경 시 주의
 
-- 백업 빈도/시간 변경: `install.sh` 의 `BACKUP_CRON` 의 `0 3 * * *` 부분 수정 후 재실행
-- 리허설 빈도/시간 변경: `install.sh` 의 `DRILL_CRON` 수정 후 재실행. **백업보다 뒤 시간이어야** 그날 백업을 검증한다
+- 백업 빈도/시간 변경: `register-cron.sh` 의 `BACKUP_CRON` 의 `0 3 * * *` 부분 수정 후 재실행. **Healthchecks.io 체크의 Schedule 도 같이 바꿔야** 오탐이 없다
+- 리허설 빈도/시간 변경: `register-cron.sh` 의 `DRILL_CRON` 수정 후 재실행 (+ HC Schedule 동기화). **백업보다 뒤 시간이어야** 그날 백업을 검증한다
 - retention 기간 변경: `backup-db.sh` 의 `RETENTION_DAYS=30` 수정
 - 버킷 이름 변경: `.env` 의 `R2_BUCKET` 만 갱신하면 됨 (스크립트 코드 변경 X)
