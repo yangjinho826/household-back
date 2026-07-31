@@ -36,7 +36,12 @@
 2. ~~**포폴 카드 확정**~~ **완료** (2026-07-30) — 4장 + 보조 2장, 백필 제거. 정본 `carrer/portfolio/household-back.md`, 이력서 블록 `carrer/resume/household-이력서-블록.md`.
 3. ~~**로드맵 2번 — 자동 복구 리허설**~~ **완료** (2026-07-30) — 매일 04:00, RTO=3s. 상세는 Status 참조.
 4. ~~**로드맵 3번 — 장애 알림**~~ **구현 완료** (2026-07-31, PR #20) — 남은 건 머지 + 외부 설정 5스텝 + 운영 검증 (상세 Status). 완료되면 "리허설 실패 알림 없음" 미끼가 구조적으로 닫힘.
-5. ~~로드맵 3번 운영 검증 + 포폴/대본 반영~~ **완료** (2026-07-31) / ~~로드맵 4번 migration playbook~~ **완료** (2026-07-31, `docs/migration-playbook.md` + 대본 Q5 격상). **다음: 다중 인스턴스 멱등성 실증** (compose 앱 2개, 동일 PostgreSQL 공유서 동일 키 경합 → 중복 0건 → 멱등성 카드 한 줄 추가).
+5. ~~로드맵 3번 운영 검증 + 포폴/대본 반영~~ **완료** (2026-07-31) / ~~로드맵 4번 migration playbook~~ **완료** (2026-07-31, `docs/migration-playbook.md` + 대본 Q5 격상). **다음: 다중 인스턴스 멱등성 실증** — 로컬 compose로 확정, 설계 탐색 완료 (2026-07-31, 구현 미착수):
+   - 구성: `docker-compose.multi.yml` 신규 — postgres-multi(55433, tmpfs) + app 2개(`build: .`, 호스트 18001/18002). **entrypoint 의 `alembic upgrade head` 는 건너뜀** (빈 baseline 이라 스키마 못 만듦 — conftest 와 같은 이유) → entrypoint override 로 uvicorn 직행, 스키마는 호스트 스크립트가 `Base.metadata.create_all`.
+   - 앱 env: DATABASE_URL(postgres-multi 향), **JWT_SECRET 은 .env.test 값과 동일하게** (스크립트가 `token_for` 로 직접 발급한 토큰을 앱이 검증해야 함), DISCORD_WEBHOOK_URL 빈 값.
+   - 스크립트(scripts/ 예정): conftest 방식 env 선주입 후 app import, `tests/fixtures/factory.py` 의 `seed_transaction_context` 재활용. 동일 키 10개 × 4발(인스턴스당 2발) gather → 거래 10건·레코드 10건 COMPLETED + 키별 200 최소 1개 + **200 바디 동일(교차 인스턴스 캐시 재생 증명)**. negative control 은 **Idempotency-Key 헤더 생략** (미들웨어 게이트가 헤더 없으면 패스 — A2/A11-nc 와 동일 원리) → 4발이 4건.
+   - 확인된 사실: 성공 응답은 200(201 아님, 라우터 status_code 미지정) / 동시 나머지는 409 또는 200 캐시 / 두 인스턴스 lifespan 에서 scheduler 둘 다 시작 — advisory lock 실전이지만 실험 창 짧아 무해.
+   - 완료 시: 포폴 멱등성 카드 한 줄 추가 + 대본 Q4 "단일 프로세스 한계" 인정 문구 격상.
 6. carrer 쪽 남은 것: JD 생기면 AI 셀프리뷰 3프롬프트, 대본 소리 내 연습. "복구 리허설 1회" 미끼는 2번으로, "백업 실패 감지" 역공은 3번으로 닫힘(운영 검증 후).
 
 **노션 누적 정리 규칙**: 트랙별 하위 페이지에 `## NN.` 섹션 이어붙임 (다시 지시 없어도). 규칙 상세는 harness 메모리 `phase1-notion-worklog`.
