@@ -5,6 +5,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp
 
+from app.core.alert import send_alert_background
 from app.core.auth.extract import extract_user_id
 
 logger = logging.getLogger("app.access")
@@ -47,5 +48,13 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             logger.debug(msg)
         else:
             logger.info(msg)
+
+        # 핸들된 5xx (HTTPException 5xx, 명시 500 응답 등) 알림.
+        # 미핸들 예외는 call_next 에서 재발생해 이 지점을 안 지나가고
+        # global_exception_handler 가 담당한다 — 두 지점이 중복 없이 상보.
+        if response.status_code >= 500:
+            send_alert_background(
+                "http5xx", f"5xx 응답: {request.method} {path} {response.status_code}",
+            )
 
         return response

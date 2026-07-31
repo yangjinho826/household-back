@@ -7,6 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.alert import send_alert
 from app.core.database import async_session
 
 logger = logging.getLogger(__name__)
@@ -37,19 +38,24 @@ async def run_locked_job(
     2. 명시 트랜잭션 시작 (advisory_xact_lock 가 살아있을 범위 보장)
     3. advisory lock 시도 — 실패 시 조용히 skip
     4. 실제 작업 실행
-    5. 예외는 로그 + 재발생 (스케줄러가 다음 trigger 대기)
+    5. 예외는 로그 + Discord 알림 + 재발생 (스케줄러가 다음 trigger 대기)
+
+    try 가 세션 컨텍스트 바깥에 있는 이유: 컨텍스트 매니저가 except 보다 먼저
+    풀리므로 롤백·세션 정리가 끝난 뒤에 알림 HTTP 호출이 나간다 (트랜잭션을
+    외부 I/O 동안 쥐고 있지 않음). 세션 생성/begin 실패(DB 다운)도 알림 대상.
     """
-    async with async_session() as session:
-        async with session.begin():
-            if not await try_advisory_lock(session, job_name):
-                logger.info("%s skipped (lock not acquired)", job_name)
-                return
-            try:
+    try:
+        async with async_session() as session:
+            async with session.begin():
+                if not await try_advisory_lock(session, job_name):
+                    logger.info("%s skipped (lock not acquired)", job_name)
+                    return
                 await fn(session)
                 logger.info("%s 완료", job_name)
-            except Exception:
-                logger.exception("%s 실패", job_name)
-                raise
+    except Exception as exc:
+        logger.exception("%s 실패", job_name)
+        await send_alert(f"job:{job_name}", f"스케줄 잡 실패: {job_name} — {exc!r}")
+        raise
 
 
 def register_jobs() -> None:

@@ -32,17 +32,35 @@ cd "$PROJECT_DIR"
 SRC="r2:${BUCKET}/daily"
 WORK_DIR="$(mktemp -d)"
 
+# ── Healthchecks.io ping (옵셔널 — URL 미설정이면 전부 no-op) ──
+# 성공 ping 이 끊기면 서버 밖(HC)이 알아챈다(dead man's switch) — cron 유실·서버
+# 다운처럼 "실패를 말해줄 주체까지 죽는" 경우를 잡는 건 침묵 감지뿐이다.
+HC_URL="${HC_PING_URL_DRILL:-}"
+PINGED=0
+
+ping_hc() {  # $1: ""|/fail  $2: 본문(선택). 알림은 보조라 실패해도 스크립트에 영향 X
+  [[ -n "$HC_URL" ]] || return 0
+  curl -fsS -m 10 --retry 3 -o /dev/null --data-raw "${2:-}" "${HC_URL}${1:-}" || true
+}
+
 fail() {
   echo "[$(date -Iseconds)] drill FAILED: $1" >&2
+  ping_hc /fail "drill FAILED: $1"   # 사유를 body 로 — HC 가 Discord 알림에 그대로 실어준다
+  PINGED=1
   exit 1
 }
 
 # 실패로 중단돼도 임시 DB 가 남아 디스크를 먹지 않게 항상 정리
 cleanup() {
+  local rc=$?   # 첫 줄에서 캡처 — 아래 명령들이 $? 를 덮어쓴다
   docker compose exec -T postgres psql -U "$PG_USER" -d postgres \
     -c "DROP DATABASE IF EXISTS ${DRILL_DB} WITH (FORCE);" >/dev/null 2>&1 || true
   docker compose exec -T postgres rm -f /tmp/drill.sql.gz >/dev/null 2>&1 || true
   rm -rf "$WORK_DIR"
+  # 백스톱: || fail 없는 라인이 set -e 로 죽으면 fail() 을 안 거친다 — 종료 코드로 잡는다
+  if [[ "$rc" -ne 0 && "$PINGED" -ne 1 ]]; then
+    ping_hc /fail "drill 비정상 종료 exit=${rc} (로그: /var/log/household-restore-drill.log)"
+  fi
 }
 trap cleanup EXIT
 
@@ -132,6 +150,9 @@ LATEST_TX=$(query "SELECT COALESCE(MAX(last_mdfcn_dt)::date::text, 'none') FROM 
 
 ELAPSED=$(( $(date +%s) - START ))   # 임시 DB drop 은 복구 시간이 아니므로 여기서 끊는다
 
-echo "[$(date -Iseconds)] drill OK: ${LATEST} ($((DUMP_BYTES / 1024 / 1024))MB) —" \
-     "tables=${TABLE_COUNT} users=${USER_COUNT} transactions=${TX_COUNT}" \
-     "hangul_ok latest_tx=${LATEST_TX} RTO=${ELAPSED}s"
+MSG="drill OK: ${LATEST} ($((DUMP_BYTES / 1024 / 1024))MB) — \
+tables=${TABLE_COUNT} users=${USER_COUNT} transactions=${TX_COUNT} \
+hangul_ok latest_tx=${LATEST_TX} RTO=${ELAPSED}s"
+echo "[$(date -Iseconds)] ${MSG}"
+ping_hc "" "$MSG"
+PINGED=1

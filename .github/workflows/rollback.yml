@@ -86,3 +86,18 @@ jobs:
           echo "⚠  DB 는 자동 복원하지 않았음 — DDL 변경 동반된 사고면 SSH 로 수동 복원 필요"
           echo "📦 incident snapshot 은 r2:.../pre-rollback/ 에 저장됨 (14일 보존)"
           echo "📦 pre-deploy 백업 (복원 source) 은 r2:.../pre-deploy/ 에 있음"
+
+      # 롤백은 이미 사고 상황에서 도는 워크플로우 — 이것마저 조용히 실패하면 최악의 침묵.
+      - name: Discord 알림 (롤백 실패)
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL secret 미설정 — 롤백 실패 알림 생략"
+            exit 0
+          fi
+          jq -n --arg c "🚨 household | 롤백 실패 — 즉시 수동 개입 필요: ${RUN_URL}" '{content: $c}' \
+            | curl -fsS -m 10 --retry 3 -H 'Content-Type: application/json' -d @- "$DISCORD_WEBHOOK_URL" \
+            || echo "::warning::Discord 알림 발송 실패"
