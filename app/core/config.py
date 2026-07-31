@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # 쿠키 — HTTPS 환경에서만 True. HTTP 운영이면 임시로 False.
     COOKIE_SECURE: bool = True
 
+    # 장애 알림 — 빈 값이면 알림 비활성 (앱 동작에는 영향 없음)
+    DISCORD_WEBHOOK_URL: str = ""
+
     @field_validator("JWT_SECRET")
     @classmethod
     def validate_jwt_secret(cls, v: str) -> str:

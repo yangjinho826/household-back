@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.alert import send_alert_background
 from app.core.api_response import ApiResponse
 from app.core.exceptions.custom_exception import CustomException
 from app.core.exceptions.error_code import ErrorCode
@@ -102,8 +103,16 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def global_exception_handler(
         request: Request, exc: Exception
     ) -> JSONResponse:
-        """처리되지 않은 예외 처리"""
+        """처리되지 않은 예외 처리
+
+        Exception 핸들러는 최외곽 ServerErrorMiddleware 에 등록되므로 라우터뿐
+        아니라 미들웨어에서 터진 예외도 여기로 온다. 미핸들 예외는 access log
+        미들웨어를 응답으로 통과하지 않아 5xx 알림이 중복되지 않는다.
+        """
         logger.exception("처리되지 않은 예외 발생: %s", exc)
+        send_alert_background(
+            "unhandled", f"미핸들 예외: {request.method} {request.url.path} — {exc!r}",
+        )
         return JSONResponse(
             status_code=500,
             content=ApiResponse.fail(
