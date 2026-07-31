@@ -76,18 +76,14 @@ for f in "$LOG_FILE" "$DRILL_LOG"; do
   sudo chown "$USER" "$f"
 done
 
-# 6. cron 등록 (기존 라인 제거 후 재등록 — 재실행해도 중복 안 쌓임)
-# 리허설은 백업 1시간 뒤 — 그날 03:00 업로드가 끝난 최신본을 대상으로 돌아야 한다.
-BACKUP_CRON="0 3 * * * $BACKUP_SCRIPT >> $LOG_FILE 2>&1 # household-backup"
-DRILL_CRON="0 4 * * * $DRILL_SCRIPT >> $DRILL_LOG 2>&1 # household-restore-drill"
-{
-  crontab -l 2>/dev/null | grep -v -e "# household-backup" -e "# household-restore-drill" || true
-  echo "$BACKUP_CRON"
-  echo "$DRILL_CRON"
-} | crontab -
-echo "[install] cron 등록 완료 — 03:00 백업 / 04:00 복구 리허설 (KST)"
+# 6. cron 등록 — register-cron.sh 로 분리 (deploy.yml 도 매 배포마다 같은 스크립트로 자가복구)
+bash "$SCRIPT_DIR/register-cron.sh"
 
-chmod +x "$BACKUP_SCRIPT" "$DRILL_SCRIPT"
+# 7. 장애 알림 ping URL 확인 — 없어도 백업은 돌아야 하니 경고만
+if [[ -z "${HC_PING_URL_BACKUP:-}" || -z "${HC_PING_URL_DRILL:-}" ]]; then
+  echo "[install] ⚠ HC_PING_URL_BACKUP / HC_PING_URL_DRILL 이 .env 에 없음 —"
+  echo "          백업·리허설이 조용히 실패해도 알림이 안 간다. infra/backup/README.md 알림 섹션 참고."
+fi
 
 echo
 echo "셋업 완료. 다음으로 수동 1회 실행해서 검증:"

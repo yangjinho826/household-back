@@ -17,6 +17,27 @@ BUCKET="${R2_BUCKET:?R2_BUCKET 환경변수가 .env 에 없음}"
 PG_USER="${POSTGRES_USER:?POSTGRES_USER 환경변수가 .env 에 없음}"
 PG_DB="${POSTGRES_DB:?POSTGRES_DB 환경변수가 .env 에 없음}"
 
+# ── Healthchecks.io ping (옵셔널 — URL 미설정이면 전부 no-op) ──
+# 성공 시 ping 을 보내고, "ping 이 끊겼다"를 서버 밖(HC)이 감지한다(dead man's switch).
+# 실패 알림을 스크립트가 직접 쏘는 구조는 cron 자체가 멈추면 같이 침묵하기 때문.
+HC_URL="${HC_PING_URL_BACKUP:-}"
+PINGED=0
+
+ping_hc() {  # $1: ""|/fail  $2: 본문(선택). 알림은 보조라 실패해도 스크립트에 영향 X
+  [[ -n "$HC_URL" ]] || return 0
+  curl -fsS -m 10 --retry 3 -o /dev/null --data-raw "${2:-}" "${HC_URL}${1:-}" || true
+}
+
+# trap ERR 가 아니라 EXIT 백스톱인 이유: ${VAR:?} 확장 실패는 ERR 를 안 태우고,
+# 함수 안 실패는 -E 없이 ERR 상속이 안 된다. 종료 코드는 경로 불문 항상 잡힌다.
+on_exit() {
+  local rc=$?
+  if [[ "$rc" -ne 0 && "$PINGED" -ne 1 ]]; then
+    ping_hc /fail "backup 실패 exit=${rc} (로그: /var/log/household-backup.log)"
+  fi
+}
+trap on_exit EXIT
+
 cd "$PROJECT_DIR"
 TS=$(date +%Y-%m-%d_%H%M%S)
 DUMP="/tmp/household-${TS}.sql.gz"
@@ -35,4 +56,7 @@ rclone delete "${DEST}/" --min-age "${RETENTION_DAYS}d" --quiet || true
 
 rm -f "$DUMP"
 
-echo "[$(date -Iseconds)] backup OK: ${DEST}/household-${TS}.sql.gz"
+MSG="backup OK: ${DEST}/household-${TS}.sql.gz"
+echo "[$(date -Iseconds)] ${MSG}"
+ping_hc "" "$MSG"
+PINGED=1
