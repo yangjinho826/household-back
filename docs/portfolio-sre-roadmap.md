@@ -11,7 +11,7 @@
 | 1 | **테스트 + CI 게이트** | 통합 테스트 49개(멱등성 14+3 / 스케줄러 8 / smoke 3 / 도메인 21) 실 PostgreSQL — 동일 키 동시 2·10발 → 최종 1건 + A11-nc 대조. ci.yml(PR)·deploy.yml(태그)이 test.yml(reusable) 공유 → 테스트+백업 2중 게이트. 포폴 반영 완료 | ✅ 2026-07-27 |
 | 2 | **자동 복구 리허설** | 매일 04:00 최신 백업을 임시 DB 복구·6항목 검증 후 정리. 운영 호스트(1vCPU) **RTO 3초 실측**. 포폴 반영 완료 | ✅ 2026-07-30 |
 | 3 | **장애 알림** | 감지+자가복구 세트: Discord + Healthchecks.io(dead man's switch) + UptimeRobot + 배포 시 cron 재등록. "장애 인지: 로그 수동 확인 → 실시간 푸시" | ✅ 2026-07-31 (운영 검증 포함) |
-| 4 | **migration/rollback playbook** | expand-contract 원칙 문서 (면접 방어) | ⬜ |
+| 4 | **migration/rollback playbook** | `docs/migration-playbook.md` — 롤백 비대칭 정의, 24개 이력 위험도 분류(rename in-place 2건 정직 기록), expand-contract(파괴적 DDL만 단계 강제), downgrade ≠ 운영 롤백, 사고 runbook 4케이스(리비전 동반 시 구 이미지 기동 불가 함정 포함). 대본 Q5 격상 완료 | ✅ 2026-07-31 |
 | 실증 | **다중 인스턴스 멱등성 실증 1회** | "앱 인스턴스 2개가 동일 PostgreSQL 공유 환경에서 동일 키 경합 시 중복 생성 0건" | ⬜ |
 | 옵션 | 용량 한계 실측 / 멱등성 오버헤드 실측 / 무중단 배포 | "1vCPU 기준 p95/5xx 꺾이는 지점 → 운영 기준선 산정" | ⬜ |
 
@@ -57,10 +57,17 @@
 
 **감수한 한계 (면접 재료)**: HC/UptimeRobot 자체 다운이면 감시 공백 (감시자의 감시자는 이 규모에선 무한 후퇴 — 두 서비스가 서로 다른 실패를 감시해 단일점은 아님) / 쿨다운 중 발생분은 로그만 / in-memory 쿨다운은 다중 인스턴스면 인스턴스별 (단일 인스턴스 전제) / 셧다운 순간의 background 알림 유실 (그 영역은 UptimeRobot 담당).
 
-## 4. migration/rollback playbook
+## 4. migration/rollback playbook — ✅ 완료 (2026-07-31)
 
 - 현재 구조의 약점: entrypoint 자동 `alembic upgrade head` + 이미지 롤백 조합 — DDL 동반 사고 시 수동 복구 (rollback.yml 에도 명시).
-- expand-contract 마이그레이션 원칙, backward-compatible release, DDL 포함 배포의 롤백 절차를 `docs/` 에 문서화.
+- `docs/migration-playbook.md` 로 문서화 완료. 핵심 구성:
+  - 롤백 가능성의 정의 한 줄 — "직전 이미지가 새 스키마에서 돌 수 있는가"
+  - 지난 24개 이력 위험도 분류 (additive/widen/backfill ✅ · drop/rename ❌) — **rename in-place 2건·drop 3건을 단일 배포로 한 이력을 정직하게 기록** ("사고 안 났다 ≠ 안전하다")
+  - expand-contract 3단계 (각 단계에서 롤백 시 안전성 명시) + 비용 조절: 파괴적 DDL 에만 단계 강제, additive 는 자유
+  - `downgrade()` ≠ 운영 롤백 수단 — drop 복원은 데이터가 0 으로 채워짐. 운영 복원은 pre-deploy 스냅샷 (복원 덤프의 alembic_version 이 구 head 라 구 이미지 자동 upgrade 는 no-op — 자기일관)
+  - 사고 runbook 4케이스 (리비전 없음 → rollback.yml 만 / additive 동반 → **구 이미지 기동 불가**(entrypoint alembic 이 새 리비전 해석 못 함 — `Can't locate revision`) 라 roll-forward 기본·급하면 alembic_version 수동 왕복 / 파괴적 DDL → 스냅샷 복원 + 유실 창 정산 / 마이그레이션 자체 실패 → transactional DDL 이라 반적용 없음)
+
+**감수한 한계 (면접 재료)**: playbook 은 문서지 강제 아님 (파괴적 DDL CI lint 는 옵션) / pre-deploy 복원의 배포~사고 유실 창은 incident 스냅샷 수동 머지 / dual-write 구간 재copy 는 수동.
 
 ## 확정된 판단 (재논의 X)
 
