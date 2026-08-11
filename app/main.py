@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -6,11 +7,12 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import close_db, init_db
+from app.core.demo import seed as demo_seed
 from app.core.exceptions.handlers import register_exception_handlers
 from app.core.idempotency.middleware import IdempotencyMiddleware
 from app.core.logging import setup_logging
 from app.core.middleware import AccessLogMiddleware
-from app.core.scheduler import register_jobs, scheduler
+from app.core.scheduler import register_jobs, run_locked_job, scheduler
 from app.domain.account.router import router as account_router
 from app.domain.account_snapshot.router import router as account_snapshot_router
 from app.domain.auth.router import router as auth_router
@@ -36,9 +38,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     register_jobs()
     scheduler.start()
+    if settings.DEMO_SEED_ENABLED:
+        # 데이터가 없을 때만 채운다 (새 서버·DB 복구 직후). 시딩은 야후 호출 + 12개월
+        # 박제라 수십 초가 걸리므로 백그라운드로 — 기동과 헬스체크를 막지 않는다.
+        asyncio.create_task(_bootstrap_demo())
     yield
     scheduler.shutdown(wait=True)
     await close_db()
+
+
+async def _bootstrap_demo() -> None:
+    """데모 부트스트랩 — advisory lock 으로 감싸 인스턴스 2개가 동시에 시딩하지 않게."""
+    await run_locked_job("bootstrap_demo", demo_seed.bootstrap_if_empty)
 
 
 app = FastAPI(

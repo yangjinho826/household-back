@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     # 장애 알림 — 빈 값이면 알림 비활성 (앱 동작에는 영향 없음)
     DISCORD_WEBHOOK_URL: str = ""
 
+    # 데모 가계부 — 이력서 공개용 체험 계정. 운영에서만 켠다.
+    # 기본값이 False 인 게 중요: 테스트는 실제 uvicorn 을 띄워 lifespan 을 태우므로
+    # 켜져 있으면 매 테스트 기동마다 시딩이 돌아 게이트가 오염된다.
+    DEMO_SEED_ENABLED: bool = False
+    DEMO_EMAIL: str = "moeum@gmail.com"
+    DEMO_PASSWORD: str = "moeum2026"
+
     @field_validator("JWT_SECRET")
     @classmethod
     def validate_jwt_secret(cls, v: str) -> str:
