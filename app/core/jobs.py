@@ -4,6 +4,8 @@
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.core.demo import seed as demo_seed
 from app.core.idempotency import service as idempotency_service
 from app.core.scheduler import run_locked_job
 from app.domain.account_snapshot import service as account_snapshot_service
@@ -54,3 +56,13 @@ async def create_monthly_snapshots_job() -> None:
         await account_snapshot_service.create_monthly_snapshots_for_all(session)
 
     await run_locked_job("create_monthly_snapshots", _run)
+
+
+async def reset_demo_job() -> None:
+    """데모 가계부 리셋 — 매일 05:00 KST (백업 03:00 · 복구 리허설 04:00 다음).
+
+    이력서에 공개된 체험 계정이라 누가 데이터를 고치거나 지워도 하루 안에 원복된다.
+    """
+    if not settings.DEMO_SEED_ENABLED:
+        return
+    await run_locked_job("reset_demo", demo_seed.seed_demo)

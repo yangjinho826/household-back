@@ -65,6 +65,7 @@ def register_jobs() -> None:
     - 환율 09:00 KST (월~금) → 미장 종목 갱신 09:10 (화~토) 직전 보장
     - 미장 09:10 KST (화~토) → KST 06:00 미장 close 후 환율 갱신 직후
     - 국장 16:10 KST (월~금) → 국장 close (16:00) 직후
+    - 데모 리셋 05:00 KST → 백업(03:00)·복구 리허설(04:00) 이 끝난 뒤
     """
     # import 는 함수 내부 — 순환 의존 회피 (jobs 가 scheduler 모듈 의존)
     from app.core import jobs
@@ -99,4 +100,10 @@ def register_jobs() -> None:
         id="create_monthly_snapshots",
         replace_existing=True,
     )
-    logger.info("스케줄 잡 등록 완료 (5개)")
+    scheduler.add_job(
+        jobs.reset_demo_job,
+        CronTrigger(hour=5, minute=0, timezone=KST),
+        id="reset_demo",
+        replace_existing=True,
+    )
+    logger.info("스케줄 잡 등록 완료 (6개)")
