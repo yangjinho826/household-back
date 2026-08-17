@@ -145,6 +145,7 @@ async def buy(
         pt_type=PortfolioTxType.BUY,
         quantity=req.quantity,
         price=req.price,
+        fee=req.fee,
         tx_date=req.tx_date or today_kst(),
         memo=req.memo,
         data_stat_cd=DataStatus.ACTIVE,
@@ -220,6 +221,7 @@ async def sell(
         pt_type=PortfolioTxType.SELL,
         quantity=req.quantity,
         price=req.sell_price,
+        fee=req.fee,
         tx_date=req.tx_date or today_kst(),
         memo=req.memo,
         data_stat_cd=DataStatus.ACTIVE,
@@ -256,6 +258,8 @@ async def update_portfolio_transaction(
         tx.quantity = req.quantity
     if req.price is not None:
         tx.price = req.price
+    if req.fee is not None:
+        tx.fee = req.fee
     if req.tx_date is not None:
         tx.tx_date = req.tx_date
     if req.memo is not None:
@@ -372,27 +376,50 @@ async def get_realized_pnl_by_item(
     from_date, to_date = _default_day_range(from_date, to_date, earliest)
     sells = await tx_repo.find_sell_txs_by_item(item_id, from_date, to_date)
 
+    rows, summary = _build_realized_pnl(sells, with_name=False)
+    return RealizedPnlResponse(
+        summary=summary,
+        rows=rows,
+        effective_from=from_date,
+        effective_to=to_date,
+    )
+
+
+def _build_realized_pnl(
+    sells: list[PortfolioTransaction], *, with_name: bool,
+) -> tuple[list[RealizedPnlRow], RealizedPnlSummary]:
+    """매도 거래 목록 → 건별 행 + 요약. 종목/계좌 단위가 공유하는 순수 계산.
+
+    with_name 은 계좌 단위에서만 True — 여러 종목이 섞이므로 행에 종목명이 필요하다.
+    """
     rows: list[RealizedPnlRow] = []
     total_realized = Decimal("0.00")
     total_cost = Decimal("0.00")
     total_sell = Decimal("0.00")
+    total_fee = Decimal("0.00")
     for tx in sells:
         pnl = tx.realized_pnl or Decimal("0.00")
         cost = tx.realized_cost_basis or Decimal("0.00")
         rate = (pnl / cost * 100) if cost > 0 else Decimal("0.00")
+        amount = tx.quantity * tx.price
         rows.append(
             RealizedPnlRow(
                 tx_id=tx.id,
                 tx_date=tx.tx_date,
+                name=tx.name if with_name else None,
                 quantity=tx.quantity,
                 sell_price=tx.price,
+                amount=amount,
+                fee=tx.fee,
+                settlement=amount - tx.fee,
                 realized_pnl=pnl,
                 realized_rate=rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
             )
         )
         total_realized += pnl
         total_cost += cost
-        total_sell += tx.quantity * tx.price
+        total_sell += amount
+        total_fee += tx.fee
 
     total_rate = (
         (total_realized / total_cost * 100) if total_cost > 0 else Decimal("0.00")
@@ -402,13 +429,9 @@ async def get_realized_pnl_by_item(
         total_rate=total_rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
         sell_amount=total_sell,
         buy_amount=total_cost,
+        total_fee=total_fee,
     )
-    return RealizedPnlResponse(
-        summary=summary,
-        rows=rows,
-        effective_from=from_date,
-        effective_to=to_date,
-    )
+    return rows, summary
 
 
 async def get_realized_pnl_by_account(
@@ -435,38 +458,7 @@ async def get_realized_pnl_by_account(
         account_id, household.id, from_date, to_date,
     )
 
-    rows: list[RealizedPnlRow] = []
-    total_realized = Decimal("0.00")
-    total_cost = Decimal("0.00")
-    total_sell = Decimal("0.00")
-    for tx in sells:
-        pnl = tx.realized_pnl or Decimal("0.00")
-        cost = tx.realized_cost_basis or Decimal("0.00")
-        rate = (pnl / cost * 100) if cost > 0 else Decimal("0.00")
-        rows.append(
-            RealizedPnlRow(
-                tx_id=tx.id,
-                tx_date=tx.tx_date,
-                name=tx.name,
-                quantity=tx.quantity,
-                sell_price=tx.price,
-                realized_pnl=pnl,
-                realized_rate=rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
-            )
-        )
-        total_realized += pnl
-        total_cost += cost
-        total_sell += tx.quantity * tx.price
-
-    total_rate = (
-        (total_realized / total_cost * 100) if total_cost > 0 else Decimal("0.00")
-    )
-    summary = RealizedPnlSummary(
-        total_realized=total_realized,
-        total_rate=total_rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
-        sell_amount=total_sell,
-        buy_amount=total_cost,
-    )
+    rows, summary = _build_realized_pnl(sells, with_name=True)
     return RealizedPnlResponse(
         summary=summary,
         rows=rows,
@@ -697,10 +689,23 @@ def _build_tx_response(tx: PortfolioTransaction, account_map: dict) -> Portfolio
         quantity=tx.quantity,
         price=tx.price,
         total=tx.quantity * tx.price,
+        fee=tx.fee,
+        settlement_amount=_settlement_amount(tx),
         tx_date=tx.tx_date,
         memo=tx.memo,
         realized_pnl=tx.realized_pnl,
     )
+
+
+def _settlement_amount(tx: PortfolioTransaction) -> Decimal:
+    """정산금액 — 실제 계좌에서 나가고 들어온 돈.
+
+    매수는 거래금액에 수수료를 더해 출금되고, 매도는 빼고 입금된다.
+    """
+    gross = tx.quantity * tx.price
+    if tx.pt_type == PortfolioTxType.BUY:
+        return gross + tx.fee
+    return gross - tx.fee
 
 
 async def _validate_investment_account(
@@ -727,6 +732,13 @@ def _recompute_realized_pnl(
     매도시점 누적 이동평균(running_avg)으로 다시 계산해 SELL row 를 갱신한다.
     txs 의 price 는 이미 KRW 박제값이라 환율 변환 불필요.
 
+    수수료(fee) — 증권사 계산과 동일:
+    - 매수 수수료는 원가에 가산돼 평단을 올린다. 따라서 `realized_cost_basis`
+      (= 매도시점 평단 × 수량) 에도 매수수수료가 자동으로 포함되고,
+      `realized_pnl / realized_cost_basis` 는 '매수원가 대비 순손익률'이 된다.
+    - 매도 수수료는 실현손익에서만 차감한다. 원가에 넣으면 이미 판 수량의
+      비용이 남은 보유분 평단까지 올린다.
+
     반환: replay 종료 시점의 (남은 수량, 남은 원가) — 호출부의 평단 재계산용.
     """
     running_qty = Decimal("0")
@@ -734,14 +746,14 @@ def _recompute_realized_pnl(
     for t in txs:
         if t.pt_type == PortfolioTxType.BUY:
             running_qty += t.quantity
-            running_cost += t.quantity * t.price
+            running_cost += t.quantity * t.price + t.fee
         elif t.pt_type == PortfolioTxType.SELL:
             running_avg = running_cost / running_qty if running_qty > 0 else Decimal("0")
             t.realized_cost_basis = (running_avg * t.quantity).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP,
             )
             t.realized_pnl = (
-                (t.price - running_avg) * t.quantity
+                (t.price - running_avg) * t.quantity - t.fee
             ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             # 매도는 평단 불변 — 수량/원가를 평단 비율로 차감 (running_avg 유지)
             running_cost -= running_avg * t.quantity

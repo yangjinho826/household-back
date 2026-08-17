@@ -47,6 +47,11 @@ class PortfolioTransaction(BaseEntity):
     pt_type: Mapped[str] = mapped_column(String(10), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    # 매매 수수료 — 매수는 원가(평단)에 가산, 매도는 실현손익에서 차감.
+    # 기존 거래는 0 이라 도입 전 계산과 동일하다.
+    fee: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, server_default=text("0"),
+    )
     tx_date: Mapped[date] = mapped_column(Date, nullable=False)
     memo: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 매도 실현손익 — SELL 만 채워짐. 매도시점 이동평균 평단 기준 건별 박제.
