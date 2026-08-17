@@ -568,6 +568,7 @@ async def _create_portfolio(  # noqa: PLR0913 — 시드 조립부라 인자가 
                 sell_date = _safe_date(month.year, month.month, 28)
                 if sell_date <= today:
                     basis = (avg_price * sell_qty).quantize(Decimal("0.01"))
+                    pnl = (sell_price * sell_qty - basis).quantize(Decimal("0.01"))
                     session.add(
                         PortfolioTransaction(
                             household_id=household_id, account_id=account_id,
@@ -577,10 +578,12 @@ async def _create_portfolio(  # noqa: PLR0913 — 시드 조립부라 인자가 
                             currency=currency, price_ccy=_ccy(sell_price, fx),
                             fee_ccy=Decimal("0"), fx_rate=fx,
                             memo="일부 차익 실현",
-                            realized_pnl=(sell_price * sell_qty - basis).quantize(
-                                Decimal("0.01"),
-                            ),
+                            realized_pnl=pnl,
                             realized_cost_basis=basis,
+                            # 거래통화 트랙도 함께 채운다 — 비워두면 매매손익 카드가
+                            # "원본 달러가를 모르는 레거시 매도"로 보고 KRW 로 폴백한다.
+                            realized_pnl_ccy=_ccy(pnl, fx),
+                            realized_cost_basis_ccy=_ccy(basis, fx),
                             data_stat_cd=DataStatus.ACTIVE,
                         )
                     )
