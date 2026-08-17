@@ -198,12 +198,18 @@ class RealizedPnlRow(CamelBaseModel):
 
     tx_id: UUID
     tx_date: date
-    name: str | None = None  # 계좌 단위 응답에서 종목명 (종목 단위 응답은 None)
+    # 종목 식별자 — 계좌 단위 응답은 여러 종목의 매도가 섞이므로, 카드를 탭해
+    # 수정 시트를 열고 갱신 대상을 정하려면 행만 보고 종목을 특정할 수 있어야 한다.
+    portfolio_item_id: UUID | None = None
+    name: str | None = None
+    code: str
+    market: Market
     quantity: Quantity
     sell_price: Money
     amount: Money  # 거래금액 (gross) = 수량 × 단가
     fee: Money
     settlement: Money  # 정산금액 = 거래금액 − 수수료
+    memo: str | None = None  # 카드 탭 → 수정 시트에 그대로 채우기 위해
     realized_pnl: Money
     realized_rate: Rate
 
