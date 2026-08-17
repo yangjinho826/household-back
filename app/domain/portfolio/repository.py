@@ -475,46 +475,17 @@ class PortfolioTransactionRepository:
     ) -> list[dict]:
         """as_of(그 달 말일) 시점 보유 종목 재구성 — 스냅샷 시점 평가용.
 
-        종목별로 as_of 까지의 BUY-SELL 순수량과 매수 평단(원가)을 집계한다.
-        과거 시가 이력이 없어 평가액은 원가(수량×평단) 기준. 순수량 0 이하(전량매도)는 제외.
+        종목별로 as_of 까지의 거래를 시간순 replay 해 수량과 평단을 구한다.
+        과거 시가 이력이 없어 평가액은 원가(수량×평단) 기준. 수량 0 이하(전량매도)는 제외.
         반환: [{item_id, name, code, market, quantity, avg_cost, cost}] (cost = 수량×평단).
+
+        **집계(GROUP BY)가 아니라 replay 인 이유** — 매도는 이동평균에서 원가를
+        평단만큼 덜어낸다. `Σ매수금액 / Σ매수수량` 으로 계산하면 매도 후 재매수한
+        종목의 평단이 종목 화면(`_recompute_realized_pnl`)과 갈리고, 그 값이 자산
+        추이 그래프에 그대로 박제된다. 정렬 기준도 replay 와 같게 맞춘다.
         """
-        qty_signed = func.sum(
-            case(
-                (PortfolioTransaction.pt_type == PortfolioTxType.BUY,
-                 PortfolioTransaction.quantity),
-                (PortfolioTransaction.pt_type == PortfolioTxType.SELL,
-                 -PortfolioTransaction.quantity),
-                else_=0,
-            )
-        )
-        buy_qty = func.sum(
-            case(
-                (PortfolioTransaction.pt_type == PortfolioTxType.BUY,
-                 PortfolioTransaction.quantity),
-                else_=0,
-            )
-        )
-        # 매수원가에 수수료 포함 — replay(_recompute_realized_pnl)가 평단에 fee 를
-        # 가산하므로 여기서 빼면 박제 평단과 종목 평단이 갈린다.
-        buy_amt = func.sum(
-            case(
-                (PortfolioTransaction.pt_type == PortfolioTxType.BUY,
-                 PortfolioTransaction.quantity * PortfolioTransaction.price
-                 + PortfolioTransaction.fee),
-                else_=0,
-            )
-        )
         result = await self.db.execute(
-            select(
-                PortfolioTransaction.portfolio_item_id.label("item_id"),
-                func.max(PortfolioTransaction.name).label("name"),
-                func.max(PortfolioTransaction.code).label("code"),
-                func.max(PortfolioTransaction.market).label("market"),
-                qty_signed.label("qty"),
-                buy_qty.label("buy_qty"),
-                buy_amt.label("buy_amt"),
-            )
+            select(PortfolioTransaction)
             .where(
                 and_(
                     PortfolioTransaction.account_id == account_id,
@@ -523,25 +494,43 @@ class PortfolioTransactionRepository:
                     PortfolioTransaction.portfolio_item_id.isnot(None),
                 )
             )
-            .group_by(PortfolioTransaction.portfolio_item_id)
+            .order_by(
+                PortfolioTransaction.tx_date.asc(),
+                PortfolioTransaction.frst_reg_dt.asc(),
+            )
         )
 
+        # item_id → [수량, 원가, 최신 메타]
+        state: dict[UUID, dict] = {}
+        for tx in result.scalars().all():
+            cur = state.setdefault(
+                tx.portfolio_item_id,
+                {"qty": Decimal("0"), "cost": Decimal("0")},
+            )
+            cur["name"], cur["code"], cur["market"] = tx.name, tx.code, tx.market
+            if tx.pt_type == PortfolioTxType.BUY:
+                cur["qty"] += tx.quantity
+                cur["cost"] += tx.quantity * tx.price + tx.fee
+            elif tx.pt_type == PortfolioTxType.SELL:
+                if cur["qty"] <= 0:
+                    continue  # 보유 없는 매도 — 데이터 이상, 원가를 음수로 만들지 않는다
+                avg = cur["cost"] / cur["qty"]
+                cur["cost"] -= avg * min(tx.quantity, cur["qty"])
+                cur["qty"] -= tx.quantity
+
         holdings: list[dict] = []
-        for row in result.all():
-            qty = Decimal(row.qty or 0)
-            if qty <= 0:
+        for item_id, cur in state.items():
+            if cur["qty"] <= 0:
                 continue  # 전량매도 — 그 시점 보유 아님
-            bq = Decimal(row.buy_qty or 0)
-            ba = Decimal(row.buy_amt or 0)
-            avg_cost = (ba / bq) if bq > 0 else Decimal("0")
+            avg_cost = cur["cost"] / cur["qty"]
             holdings.append({
-                "item_id": row.item_id,
-                "name": row.name,
-                "code": row.code,
-                "market": row.market,
-                "quantity": qty,
+                "item_id": item_id,
+                "name": cur["name"],
+                "code": cur["code"],
+                "market": cur["market"],
+                "quantity": cur["qty"],
                 "avg_cost": avg_cost.quantize(Decimal("0.01")),
-                "cost": (qty * avg_cost).quantize(Decimal("0.01")),
+                "cost": cur["cost"].quantize(Decimal("0.01")),
             })
         return holdings
 

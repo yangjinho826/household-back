@@ -24,6 +24,8 @@
 | 9 | settlement_amount — 매수=금액+fee, 매도=금액−fee |
 | 10 | 요약 total_fee = 기간 내 매도 수수료 합계 |
 | 11 | asof_holdings 평단에도 매수 fee 반영 (스냅샷 ↔ 종목 일치) |
+| 12 | 매도후 재매수해도 스냅샷 평단 = 종목 평단 (이동평균 통일) |
+| 13 | as_of 이후 거래는 스냅샷에 섞이지 않는다 |
 
 11 이 중요한 이유: `asof_holdings_by_account` 는 스냅샷 박제용 별도 집계 경로다.
 replay 에만 fee 를 넣으면 박제된 평단과 화면 평단이 갈린다.
@@ -333,3 +335,53 @@ async def test_스냅샷용_보유집계_평단에도_매수수수료가_반영�
     assert len(holdings) == 1
     assert holdings[0]["avg_cost"] == item.avg_price == Decimal("1050.00")
     assert holdings[0]["cost"] == Decimal("10500.00")
+
+
+async def test_매도후_재매수한_종목도_스냅샷_평단이_종목_평단과_같다(db, ctx):
+    """단순평균(Σ매수금액 / Σ매수수량)으로 집계하면 매도가 평단을 되돌려버린다.
+
+    매수 10@100 → 매도 5 → 매수 5@200
+      이동평균(종목): 원가 1,500 / 10주 → 150
+      단순평균(집계): 2,000 / 15주    → 133.33
+    스냅샷은 자산 추이 그래프의 과거 구간을 박제하므로, 두 값이 갈리면
+    그래프가 화면의 종목 평단과 다른 이야기를 하게 된다.
+    """
+    # given
+    item_id = await _new_item(db, ctx)
+    await _buy(db, ctx, item_id, qty="10", price="100", tx_date=date(2026, 1, 1))
+    await service.sell(
+        db, ctx.household, item_id,
+        PortfolioSellRequest(
+            quantity=Decimal("5"), sellPrice=Decimal("120"), txDate=date(2026, 2, 1),
+        ),
+    )
+    await _buy(db, ctx, item_id, qty="5", price="200", tx_date=date(2026, 3, 1))
+
+    # when
+    holdings = await PortfolioTransactionRepository(db).asof_holdings_by_account(
+        ctx.account.id, date(2026, 12, 31),
+    )
+
+    # then
+    item = await _item(db, item_id)
+    assert item.avg_price == Decimal("150.00")
+    assert holdings[0]["quantity"] == Decimal("10")
+    assert holdings[0]["avg_cost"] == item.avg_price
+    assert holdings[0]["cost"] == Decimal("1500.00")
+
+
+async def test_as_of_이후_거래는_스냅샷_평단에_섞이지_않는다(db, ctx):
+    """박제는 그 시점까지의 사실만 담아야 한다 — replay 로 바꿔도 컷은 유지된다."""
+    # given: 1월 매수 후 3월에 비싼 매수
+    item_id = await _new_item(db, ctx)
+    await _buy(db, ctx, item_id, qty="10", price="100", tx_date=date(2026, 1, 1))
+    await _buy(db, ctx, item_id, qty="10", price="500", tx_date=date(2026, 3, 1))
+
+    # when: 2월 말 기준
+    holdings = await PortfolioTransactionRepository(db).asof_holdings_by_account(
+        ctx.account.id, date(2026, 2, 28),
+    )
+
+    # then: 3월 매수는 없는 셈
+    assert holdings[0]["quantity"] == Decimal("10")
+    assert holdings[0]["avg_cost"] == Decimal("100.00")
