@@ -7,7 +7,7 @@ from pydantic import model_validator
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.pagination import CursorPage
 from app.core.schema import CamelBaseModel
-from app.core.types import Money, Quantity, Rate
+from app.core.types import Money, Price, Quantity, Rate
 from app.domain.account.schema import AccountResponse
 from app.domain.portfolio.enum import Market, PortfolioTxType
 
@@ -171,10 +171,10 @@ class PortfolioResponse(CamelBaseModel):
     # 거래통화 — 화면 주 표기(토스증권식 $ 주 + ₩ 보조)와 환율 제외 수익률.
     # NULL 이면 원본 달러가를 모르는 과거 데이터라 화면은 KRW 단독으로 폴백한다.
     currency: str
-    avg_price_ccy: Decimal | None = None
-    current_price_ccy: Decimal | None = None
-    profit_loss_ccy: Decimal | None = None
-    profit_loss_rate_ccy: Decimal | None = None
+    avg_price_ccy: Price | None = None
+    current_price_ccy: Price | None = None
+    profit_loss_ccy: Money | None = None
+    profit_loss_rate_ccy: Rate | None = None
     is_archived: bool
 
 
@@ -196,9 +196,9 @@ class PortfolioTxResponse(CamelBaseModel):
     fee: Money
     settlement_amount: Money
     currency: str
-    price_ccy: Decimal | None = None
-    fee_ccy: Decimal | None = None
-    fx_rate: Decimal | None = None
+    price_ccy: Price | None = None
+    fee_ccy: Money | None = None
+    fx_rate: Price | None = None
     tx_date: date
     memo: str | None
     # 매도 실현손익 — SELL 만 값, BUY/미집계는 null
@@ -224,6 +224,15 @@ class RealizedPnlRow(CamelBaseModel):
     memo: str | None = None  # 카드 탭 → 수정 시트에 그대로 채우기 위해
     realized_pnl: Money
     realized_rate: Rate
+    # 거래통화 기준 — 원화 손익률에는 환차손익이 섞이므로 종목 자체 성과는 이쪽이다.
+    # 레거시 매도(원본 달러가 없음)는 전부 NULL → 화면은 KRW 단독으로 폴백.
+    currency: str
+    sell_price_ccy: Price | None = None
+    amount_ccy: Money | None = None
+    fee_ccy: Money | None = None
+    settlement_ccy: Money | None = None
+    realized_pnl_ccy: Money | None = None
+    realized_rate_ccy: Rate | None = None
 
 
 class RealizedPnlSummary(CamelBaseModel):
@@ -232,6 +241,10 @@ class RealizedPnlSummary(CamelBaseModel):
     sell_amount/buy_amount 는 gross, total_realized 는 수수료 차감 후 net 이라
     한 화면에 gross 와 net 이 섞인다. total_fee 를 따로 두어 그 차이를 드러낸다
     (증권사 매매손익 화면의 '제비용'과 같은 역할).
+
+    **KRW 단독** — 계좌 단위는 원화 종목과 달러 종목의 매도가 한 표에 섞인다.
+    통화가 다른 금액은 더할 수 없으므로 거래통화 합계는 두지 않는다.
+    거래통화 기준 성과는 행(`RealizedPnlRow`)에서만 본다.
     """
 
     total_realized: Money

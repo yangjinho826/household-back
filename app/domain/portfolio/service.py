@@ -317,12 +317,24 @@ async def update_portfolio_transaction(
     if not tx or tx.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
+    # 금액 입력 단위는 그 거래가 기록된 방식을 따른다. price_ccy 가 있으면 매수·매도와
+    # 같은 계약(거래통화 입력 → KRW 파생)이고, NULL 인 레거시 거래는 원화 입력 그대로다.
+    # 화면도 같은 필드로 단위를 정하므로 양쪽 판정이 어긋나지 않는다.
+    # 환율은 새로 조회하지 않고 거래에 박제된 값을 쓴다 — 단가 오타 하나 고쳤다고
+    # 과거 거래가 오늘 환율로 재평가되면 안 된다.
+    records_ccy = tx.price_ccy is not None
+    fx = tx.fx_rate or Decimal("1")
+
     if req.quantity is not None:
         tx.quantity = req.quantity
     if req.price is not None:
-        tx.price = req.price
+        tx.price = _to_krw(req.price, fx) if records_ccy else req.price
+        if records_ccy:
+            tx.price_ccy = req.price
     if req.fee is not None:
-        tx.fee = req.fee
+        tx.fee = _to_krw(req.fee, fx) if records_ccy else req.fee
+        if records_ccy:
+            tx.fee_ccy = req.fee
     if req.tx_date is not None:
         tx.tx_date = req.tx_date
     if req.memo is not None:
@@ -448,6 +460,39 @@ async def get_realized_pnl_by_item(
     )
 
 
+def _realized_ccy(tx: PortfolioTransaction) -> dict[str, Decimal | None]:
+    """매도 1건의 거래통화 지표. 근거가 없으면 전부 None 으로 비운다.
+
+    부분적으로만 채우면 화면이 달러 금액과 원화 수익률을 한 줄에 섞어 보여준다.
+    """
+    if tx.price_ccy is None or tx.realized_pnl_ccy is None:
+        return {
+            "sell_price_ccy": None,
+            "amount_ccy": None,
+            "fee_ccy": None,
+            "settlement_ccy": None,
+            "realized_pnl_ccy": None,
+            "realized_rate_ccy": None,
+        }
+
+    amount_ccy = tx.quantity * tx.price_ccy
+    fee_ccy = tx.fee_ccy or Decimal("0.00")
+    cost_ccy = tx.realized_cost_basis_ccy or Decimal("0.00")
+    rate_ccy = (
+        (tx.realized_pnl_ccy / cost_ccy * 100) if cost_ccy > 0 else Decimal("0.00")
+    )
+    return {
+        "sell_price_ccy": tx.price_ccy,
+        "amount_ccy": amount_ccy,
+        "fee_ccy": fee_ccy,
+        "settlement_ccy": amount_ccy - fee_ccy,
+        "realized_pnl_ccy": tx.realized_pnl_ccy,
+        "realized_rate_ccy": rate_ccy.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        ),
+    }
+
+
 def _build_realized_pnl(
     sells: list[PortfolioTransaction], *, with_name: bool,
 ) -> tuple[list[RealizedPnlRow], RealizedPnlSummary]:
@@ -465,6 +510,11 @@ def _build_realized_pnl(
         cost = tx.realized_cost_basis or Decimal("0.00")
         rate = (pnl / cost * 100) if cost > 0 else Decimal("0.00")
         amount = tx.quantity * tx.price
+
+        # 거래통화 트랙 — 원본 달러가와 달러 실현손익이 **둘 다** 있을 때만 채운다.
+        # 하나라도 없으면 레거시 매도라 달러 성과를 계산할 근거가 없다.
+        ccy = _realized_ccy(tx)
+
         rows.append(
             RealizedPnlRow(
                 tx_id=tx.id,
@@ -482,6 +532,8 @@ def _build_realized_pnl(
                 memo=tx.memo,
                 realized_pnl=pnl,
                 realized_rate=rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                currency=tx.currency,
+                **ccy,
             )
         )
         total_realized += pnl
