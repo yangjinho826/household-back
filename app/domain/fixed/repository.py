@@ -23,6 +23,19 @@ class FixedRepository:
         )
         return result.scalar_one_or_none()
 
+    async def find_by_ids(self, ids: list[UUID]) -> list[FixedExpense]:
+        """거래 응답에 고정지출명을 붙이기 위한 batch 조회 — 상태 필터 없음.
+
+        보관/삭제된 고정지출도 과거 거래에는 그대로 물려 있다. ACTIVE 로 거르면
+        그 거래들이 이름 없이 표시되므로, 여기서는 id 로만 찾는다.
+        """
+        if not ids:
+            return []
+        result = await self.db.execute(
+            select(FixedExpense).where(FixedExpense.id.in_(ids))
+        )
+        return list(result.scalars().all())
+
     async def find_active_by_household_id(self, household_id: UUID) -> list[FixedExpense]:
         result = await self.db.execute(
             select(FixedExpense)

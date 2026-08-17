@@ -123,6 +123,8 @@ class TransactionResponse(CamelBaseModel):
     category_icon: str | None
     paid_by_user_id: UUID | None
     fixed_expense_id: UUID | None
+    # 보관/삭제된 고정지출에 물린 과거 거래도 이름이 채워진다 (FixedRepository.find_by_ids)
+    fixed_expense_name: str | None
     valuation_direction: ValuationDirection | None
     memo: str | None
 

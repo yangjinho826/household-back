@@ -27,3 +27,7 @@
 2026-07-31: 장애 알림 채널 — Discord webhook (기존 운영 채널이라 설정 비용 0, curl 한 줄, 외부 모니터링 서비스 Discord 연동 전부 free. Telegram은 기존 이력 없어 이득 없음, ntfy.sh는 무료 topic 보안 약점으로 탈락)
 2026-07-31: 헬스체크·cron 감시 — Healthchecks.io + UptimeRobot free 조합 (잡는 실패 유형이 상호배타: dead man's switch=cron 생존, /health 폴링=서버 생존. Uptime Kuma는 동일 서버 자기모순, GH Actions schedule은 지연 5~60분+60일 비활성 자동꺼짐으로 탈락. 서버 발신 알림은 서버가 죽으면 못 나가므로 감시 주체를 서버 밖에 두는 게 원칙)
 2026-07-31: cron 자가복구 — 등록부를 register-cron.sh로 분리해 deploy.yml SSH step에서 매 배포 재등록 (멱등·sudo 불필요. HC 감지와 보완: 예방=배포 시 자가복구, 감지=배포 없는 기간 유실을 HC가 잡음. install.sh 통째 실행은 sudo 필요 스텝 때문에 배포에 안 섞음)
+2026-08-17: MVP 추가개발 진행 방식 — 6+1 항목을 4단계로 쪼개 하나씩 (사용자 "한번에 다 하지말고 나랑 얘기하면서". 순서 = ①고정지출라벨+거래복사(마이그레이션 0) → ②수수료 → ③매매손익 카드+매도수정 → ④USD. ②→③ 은 카드가 fee 를 표시해 순서 의존. 백엔드만 TDD(RED→GREEN), 프론트는 육안 검증)
+2026-08-17: 거래 응답의 고정지출명 — `FixedRepository.find_by_ids` 를 상태 필터 없이 (고정지출 삭제는 soft delete 라 FK SET NULL 이 안 터지고 거래는 fixed_expense_id 를 계속 보유 → ACTIVE 로 거르면 보관/삭제된 항목의 과거 거래가 `고정지출 · —` 로 깨짐. 2026-06-03 카테고리 결정의 선례를 그대로 계승. 프론트가 formOptions.fixedExpenses 로 매핑하는 대안은 그 목록이 is_archived=False 만 내려줘 탈락)
+2026-08-17: 매매 수수료 반영 범위 — 평단 가산 + 실현손익 차감 + 매매현금 반영 (증권사 계산과 동일. "실현손익만 차감"·"표시만"은 화면 숫자가 증권사 앱과 갈려 탈락. 기존 거래는 fee=0 이라 replay 결과 불변 = 회귀 없음)
+2026-08-17: USD 거래 저장 — KRW 컬럼을 진실 원천으로 두고 거래통화 컬럼 병행 추가 (거래통화로 전환하는 대안은 account/service.py:305-306·wealth/service.py:165·portfolio/repository.py:136 이 quantity*current_price 를 통화 구분 없이 합산해 순자산이 조용히 틀림. 표시·손익률만 거래통화 기준(토스증권식 $ 주 + ₩ 보조). 거래시점 환율은 tx 에 박제하되 currency_rates 가 최신값 1행뿐이라 과거 소급 입력은 최신 환율로 박제되는 한계 인지)

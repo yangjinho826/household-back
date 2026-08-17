@@ -51,17 +51,22 @@ async def list_transactions(
     has_next = len(rows) > limit
     items_rows = rows[:limit]
 
-    # account/category 일괄 조회
+    # account/category/고정지출 일괄 조회
     account_ids = {r.account_id for r in items_rows}
     account_ids.update({r.to_account_id for r in items_rows if r.to_account_id})
     category_ids = {r.category_id for r in items_rows if r.category_id}
+    fixed_ids = {r.fixed_expense_id for r in items_rows if r.fixed_expense_id}
 
     accounts = await AccountRepository(db).find_by_ids(list(account_ids))
     categories = await CategoryRepository(db).find_by_ids(list(category_ids))
+    fixed_expenses = await FixedRepository(db).find_by_ids(list(fixed_ids))
     account_map = {a.id: a for a in accounts}
     category_map = {c.id: c for c in categories}
+    fixed_map = {f.id: f for f in fixed_expenses}
 
-    items = [_build_response(r, account_map, category_map) for r in items_rows]
+    items = [
+        _build_response(r, account_map, category_map, fixed_map) for r in items_rows
+    ]
 
     next_cursor = None
     if has_next:
@@ -112,9 +117,9 @@ async def list_account_ledger(
     items_rows = rows[:limit]
 
     start_balance = await _ledger_start_balance(repo, account, carry, balance_to_date)
-    account_map, category_map = await _load_ledger_maps(db, items_rows)
+    account_map, category_map, fixed_map = await _load_ledger_maps(db, items_rows)
     items, running = _build_ledger_items(
-        items_rows, account_id, account_map, category_map, start_balance,
+        items_rows, account_id, account_map, category_map, fixed_map, start_balance,
     )
 
     next_cursor = None
@@ -390,10 +395,12 @@ def _build_response(
     tx: Transaction,
     account_map: dict,
     category_map: dict,
+    fixed_map: dict,
 ) -> TransactionResponse:
     account = account_map.get(tx.account_id)
     to_account = account_map.get(tx.to_account_id) if tx.to_account_id else None
     category = category_map.get(tx.category_id) if tx.category_id else None
+    fixed = fixed_map.get(tx.fixed_expense_id) if tx.fixed_expense_id else None
     return TransactionResponse(
         id=tx.id,
         household_id=tx.household_id,
@@ -410,6 +417,7 @@ def _build_response(
         category_icon=category.icon if category else None,
         paid_by_user_id=tx.paid_by_user_id,
         fixed_expense_id=tx.fixed_expense_id,
+        fixed_expense_name=fixed.name if fixed else None,
         valuation_direction=(
             ValuationDirection(tx.valuation_direction)
             if tx.valuation_direction
@@ -485,14 +493,20 @@ async def _ledger_start_balance(
 
 async def _load_ledger_maps(
     db: AsyncSession, rows: list[Transaction],
-) -> tuple[dict, dict]:
-    """행에 등장한 계좌(이체 상대 포함)·카테고리 batch 로드."""
+) -> tuple[dict, dict, dict]:
+    """행에 등장한 계좌(이체 상대 포함)·카테고리·고정지출 batch 로드."""
     account_ids = {r.account_id for r in rows}
     account_ids.update({r.to_account_id for r in rows if r.to_account_id})
     category_ids = {r.category_id for r in rows if r.category_id}
+    fixed_ids = {r.fixed_expense_id for r in rows if r.fixed_expense_id}
     accounts = await AccountRepository(db).find_by_ids(list(account_ids))
     categories = await CategoryRepository(db).find_by_ids(list(category_ids))
-    return {a.id: a for a in accounts}, {c.id: c for c in categories}
+    fixed_expenses = await FixedRepository(db).find_by_ids(list(fixed_ids))
+    return (
+        {a.id: a for a in accounts},
+        {c.id: c for c in categories},
+        {f.id: f for f in fixed_expenses},
+    )
 
 
 def _build_ledger_items(
@@ -500,6 +514,7 @@ def _build_ledger_items(
     account_id: UUID,
     account_map: dict,
     category_map: dict,
+    fixed_map: dict,
     start_balance: Decimal,
 ) -> tuple[list[AccountLedgerItem], Decimal]:
     """각 행에 running balance(거래 후 잔액)를 부여하며 역산. 끝 잔액(다음 페이지 carry) 반환.
@@ -511,7 +526,7 @@ def _build_ledger_items(
     running = start_balance
     for r in rows:
         signed = _signed_amount(r, account_id)
-        base = _build_response(r, account_map, category_map)
+        base = _build_response(r, account_map, category_map, fixed_map)
         items.append(
             AccountLedgerItem(
                 **base.model_dump(),
@@ -571,16 +586,19 @@ def _validate_transfer_consistency(tx: Transaction) -> None:
 
 
 async def _single_response(db: AsyncSession, tx: Transaction) -> TransactionResponse:
-    """단일 거래 응답 — account/category JOIN"""
+    """단일 거래 응답 — account/category/고정지출 JOIN"""
     account_ids = [tx.account_id]
     if tx.to_account_id:
         account_ids.append(tx.to_account_id)
     category_ids = [tx.category_id] if tx.category_id else []
+    fixed_ids = [tx.fixed_expense_id] if tx.fixed_expense_id else []
 
     accounts = await AccountRepository(db).find_by_ids(account_ids)
     categories = await CategoryRepository(db).find_by_ids(category_ids)
+    fixed_expenses = await FixedRepository(db).find_by_ids(fixed_ids)
     return _build_response(
         tx,
         {a.id: a for a in accounts},
         {c.id: c for c in categories},
+        {f.id: f for f in fixed_expenses},
     )

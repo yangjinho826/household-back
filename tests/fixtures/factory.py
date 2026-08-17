@@ -19,6 +19,7 @@ from app.domain.account.enum import AccountType
 from app.domain.account.model import Account
 from app.domain.category.enum import CategoryKind
 from app.domain.category.model import Category
+from app.domain.fixed.model import FixedExpense
 from app.domain.household.enum import HouseholdRole
 from app.domain.household.model import Household, HouseholdMember
 from app.domain.user.model import User
@@ -105,6 +106,27 @@ async def category_factory(
     db.add(category)
     await db.flush()
     return category
+
+
+async def fixed_expense_factory(
+    db: AsyncSession,
+    *,
+    household: Household,
+    name: str = "월세",
+    day_of_month: int = 25,
+    is_archived: bool = False,
+) -> FixedExpense:
+    fixed = FixedExpense(
+        household_id=household.id,
+        name=name,
+        day_of_month=day_of_month,
+        sort_order=0,
+        is_archived=is_archived,
+        data_stat_cd=DataStatus.ACTIVE,
+    )
+    db.add(fixed)
+    await db.flush()
+    return fixed
 
 
 def token_for(user: User) -> str:
