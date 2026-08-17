@@ -406,12 +406,17 @@ def _build_realized_pnl(
             RealizedPnlRow(
                 tx_id=tx.id,
                 tx_date=tx.tx_date,
+                portfolio_item_id=tx.portfolio_item_id,
+                # 종목 단위 응답은 화면 헤더에 이미 종목명이 있어 행에서는 생략한다.
                 name=tx.name if with_name else None,
+                code=tx.code,
+                market=Market(tx.market),
                 quantity=tx.quantity,
                 sell_price=tx.price,
                 amount=amount,
                 fee=tx.fee,
                 settlement=amount - tx.fee,
+                memo=tx.memo,
                 realized_pnl=pnl,
                 realized_rate=rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
             )
@@ -748,6 +753,11 @@ def _recompute_realized_pnl(
             running_qty += t.quantity
             running_cost += t.quantity * t.price + t.fee
         elif t.pt_type == PortfolioTxType.SELL:
+            # 그 시점 보유보다 많이 팔 수는 없다. 최종 수량만 검사하면 매도가 매수보다
+            # 앞선 순서를 뒤따르는 매수가 가려주고, 그 매도는 running_avg=0 으로
+            # 계산돼 매도금액 전액이 이익으로 박제된다(원가 0).
+            if t.quantity > running_qty:
+                raise CustomException(ErrorCode.BAD_REQUEST)
             running_avg = running_cost / running_qty if running_qty > 0 else Decimal("0")
             t.realized_cost_basis = (running_avg * t.quantity).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP,
