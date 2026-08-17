@@ -14,6 +14,19 @@ from app.domain.portfolio.model import (
 )
 
 
+def _settlement_expr():
+    """정산금액 SQL 식 — 매수는 거래금액+수수료, 매도는 거래금액−수수료.
+
+    계좌를 실제로 드나든 금액이라 매매현금 합산의 기준이 된다.
+    """
+    gross = PortfolioTransaction.quantity * PortfolioTransaction.price
+    return case(
+        (PortfolioTransaction.pt_type == PortfolioTxType.BUY,
+         gross + PortfolioTransaction.fee),
+        else_=gross - PortfolioTransaction.fee,
+    )
+
+
 class PortfolioItemRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -289,7 +302,11 @@ class PortfolioTransactionRepository:
     async def sum_for_account(
         self, account_id: UUID, to_date: date | None = None,
     ) -> dict[str, Decimal]:
-        """통장별 BUY/SELL 합산 — 단가 * 수량 (_calc_balance 용).
+        """통장별 BUY/SELL 정산금액 합산 (_calc_balance 용).
+
+        실제 계좌를 드나든 금액이라 수수료가 포함된다 — 매수는 금액+수수료 출금,
+        매도는 금액−수수료 입금. 호출부(`account/service.py`)의
+        `cash = cash - buy + sell` 공식은 그대로 성립한다.
 
         to_date 를 주면 그 날짜까지의 누적(스냅샷 as-of 잔액용). 없으면 전체.
         """
@@ -302,9 +319,7 @@ class PortfolioTransactionRepository:
         result = await self.db.execute(
             select(
                 PortfolioTransaction.pt_type,
-                func.coalesce(
-                    func.sum(PortfolioTransaction.quantity * PortfolioTransaction.price), 0
-                ).label("total"),
+                func.coalesce(func.sum(_settlement_expr()), 0).label("total"),
             )
             .where(and_(*conds))
             .group_by(PortfolioTransaction.pt_type)
@@ -320,7 +335,7 @@ class PortfolioTransactionRepository:
     async def sum_for_accounts(
         self, account_ids: list[UUID],
     ) -> dict[UUID, dict[str, Decimal]]:
-        """여러 통장 BUY/SELL 합산 배치 — 계좌목록 잔액 N+1 제거용."""
+        """여러 통장 BUY/SELL 정산금액 합산 배치 — 계좌목록 잔액 N+1 제거용."""
         base = {
             aid: {"buy": Decimal("0"), "sell": Decimal("0")} for aid in account_ids
         }
@@ -330,9 +345,7 @@ class PortfolioTransactionRepository:
             select(
                 PortfolioTransaction.account_id,
                 PortfolioTransaction.pt_type,
-                func.coalesce(
-                    func.sum(PortfolioTransaction.quantity * PortfolioTransaction.price), 0
-                ).label("total"),
+                func.coalesce(func.sum(_settlement_expr()), 0).label("total"),
             )
             .where(
                 and_(
@@ -478,10 +491,13 @@ class PortfolioTransactionRepository:
                 else_=0,
             )
         )
+        # 매수원가에 수수료 포함 — replay(_recompute_realized_pnl)가 평단에 fee 를
+        # 가산하므로 여기서 빼면 박제 평단과 종목 평단이 갈린다.
         buy_amt = func.sum(
             case(
                 (PortfolioTransaction.pt_type == PortfolioTxType.BUY,
-                 PortfolioTransaction.quantity * PortfolioTransaction.price),
+                 PortfolioTransaction.quantity * PortfolioTransaction.price
+                 + PortfolioTransaction.fee),
                 else_=0,
             )
         )

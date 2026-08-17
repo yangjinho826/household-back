@@ -68,10 +68,14 @@ class PortfolioLookupResponse(CamelBaseModel):
 
 
 class PortfolioBuyRequest(CamelBaseModel):
-    """매수 액션 — qty 누적 + avg_price 재계산 + 이력 기록"""
+    """매수 액션 — qty 누적 + avg_price 재계산 + 이력 기록.
+
+    fee 는 매수원가에 가산돼 평단을 올린다(증권사 계산과 동일).
+    """
 
     quantity: Decimal
     price: Decimal
+    fee: Decimal = Decimal("0")
     tx_date: date | None = None
     memo: str | None = None
 
@@ -80,6 +84,8 @@ class PortfolioBuyRequest(CamelBaseModel):
         if self.quantity <= 0:
             raise CustomException(ErrorCode.BAD_REQUEST)
         if self.price <= 0:
+            raise CustomException(ErrorCode.BAD_REQUEST)
+        if self.fee < 0:
             raise CustomException(ErrorCode.BAD_REQUEST)
         return self
 
@@ -106,10 +112,11 @@ class PortfolioUpdateRequest(CamelBaseModel):
 
 
 class PortfolioSellRequest(CamelBaseModel):
-    """매도 요청 (부분/전량)"""
+    """매도 요청 (부분/전량). fee 는 실현손익에서 차감된다."""
 
     quantity: Decimal
     sell_price: Decimal
+    fee: Decimal = Decimal("0")
     tx_date: date | None = None
     memo: str | None = None
 
@@ -119,6 +126,8 @@ class PortfolioSellRequest(CamelBaseModel):
             raise CustomException(ErrorCode.BAD_REQUEST)
         if self.sell_price <= 0:
             raise CustomException(ErrorCode.BAD_REQUEST)
+        if self.fee < 0:
+            raise CustomException(ErrorCode.BAD_REQUEST)
         return self
 
 
@@ -127,6 +136,7 @@ class PortfolioTxUpdateRequest(CamelBaseModel):
 
     quantity: Decimal | None = None
     price: Decimal | None = None
+    fee: Decimal | None = None
     tx_date: date | None = None
     memo: str | None = None
 
@@ -135,6 +145,8 @@ class PortfolioTxUpdateRequest(CamelBaseModel):
         if self.quantity is not None and self.quantity <= 0:
             raise CustomException(ErrorCode.BAD_REQUEST)
         if self.price is not None and self.price <= 0:
+            raise CustomException(ErrorCode.BAD_REQUEST)
+        if self.fee is not None and self.fee < 0:
             raise CustomException(ErrorCode.BAD_REQUEST)
         return self
 
@@ -170,7 +182,11 @@ class PortfolioTxResponse(CamelBaseModel):
     pt_type: PortfolioTxType
     quantity: Quantity
     price: Money
+    # total 은 거래금액(gross, 수량×단가), settlement_amount 는 정산금액(net).
+    # 증권사 거래내역이 둘 다 보여주므로 어느 하나로 대체하지 않는다.
     total: Money
+    fee: Money
+    settlement_amount: Money
     tx_date: date
     memo: str | None
     # 매도 실현손익 — SELL 만 값, BUY/미집계는 null
@@ -185,17 +201,26 @@ class RealizedPnlRow(CamelBaseModel):
     name: str | None = None  # 계좌 단위 응답에서 종목명 (종목 단위 응답은 None)
     quantity: Quantity
     sell_price: Money
+    amount: Money  # 거래금액 (gross) = 수량 × 단가
+    fee: Money
+    settlement: Money  # 정산금액 = 거래금액 − 수수료
     realized_pnl: Money
     realized_rate: Rate
 
 
 class RealizedPnlSummary(CamelBaseModel):
-    """매매손익 요약 — 기간 내 매도 전체 합산"""
+    """매매손익 요약 — 기간 내 매도 전체 합산.
+
+    sell_amount/buy_amount 는 gross, total_realized 는 수수료 차감 후 net 이라
+    한 화면에 gross 와 net 이 섞인다. total_fee 를 따로 두어 그 차이를 드러낸다
+    (증권사 매매손익 화면의 '제비용'과 같은 역할).
+    """
 
     total_realized: Money
     total_rate: Rate
     sell_amount: Money
     buy_amount: Money
+    total_fee: Money
 
 
 class RealizedPnlResponse(CamelBaseModel):
