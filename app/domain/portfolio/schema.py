@@ -161,12 +161,20 @@ class PortfolioResponse(CamelBaseModel):
     code: str
     market: Market
     quantity: Quantity
+    # KRW — 합산·순자산의 기준
     avg_price: Money
     current_price: Money
     cost: Money
     valuation: Money
     profit_loss: Money
     profit_loss_rate: Rate
+    # 거래통화 — 화면 주 표기(토스증권식 $ 주 + ₩ 보조)와 환율 제외 수익률.
+    # NULL 이면 원본 달러가를 모르는 과거 데이터라 화면은 KRW 단독으로 폴백한다.
+    currency: str
+    avg_price_ccy: Decimal | None = None
+    current_price_ccy: Decimal | None = None
+    profit_loss_ccy: Decimal | None = None
+    profit_loss_rate_ccy: Decimal | None = None
     is_archived: bool
 
 
@@ -187,6 +195,10 @@ class PortfolioTxResponse(CamelBaseModel):
     total: Money
     fee: Money
     settlement_amount: Money
+    currency: str
+    price_ccy: Decimal | None = None
+    fee_ccy: Decimal | None = None
+    fx_rate: Decimal | None = None
     tx_date: date
     memo: str | None
     # 매도 실현손익 — SELL 만 값, BUY/미집계는 null

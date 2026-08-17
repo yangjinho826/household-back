@@ -85,7 +85,7 @@ async def refresh(
             household_id, markets,
         )
 
-    prices_to_apply: dict[tuple[str, Market], Decimal] = {}
+    prices_to_apply: dict[tuple[str, Market], tuple[Decimal, Decimal]] = {}
     fetched = 0
     skipped = 0
     chunk_list = list(_chunks(pairs, _CHUNK_SIZE))
@@ -129,16 +129,25 @@ def _chunks(items: list, size: int) -> Iterator[list]:
 
 async def _fetch_one(
     code: str, market: Market, fx_rate: Decimal | None,
-) -> Decimal | None:
-    """시장별 1:1 야후 심볼로 1번 호출. USD 시장이면 fx_rate 곱해 KRW 환산."""
+) -> tuple[Decimal, Decimal] | None:
+    """시장별 1:1 야후 심볼로 1번 호출.
+
+    반환: (KRW 환산가, 거래통화 원본가). USD 시장이면 fx_rate 를 곱해 KRW 를 만들고
+    원본 달러가는 그대로 돌려준다 — 화면이 달러를 주 표기로 쓰기 때문에 환산 전
+    값을 버리면 안 된다. 국내 시장은 둘이 같다.
+    """
     symbol = build_yahoo_symbol(market, code)
     quote = await fetch_chart_quote(symbol)
     if quote is None or quote.price <= 0:
         return None
-    price = quote.price
+    price_ccy = quote.price
+    price = price_ccy
     if market in _USD_MARKETS and fx_rate is not None:
-        price = price * fx_rate
-    return price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        price = price_ccy * fx_rate
+    return (
+        price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        price_ccy.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
+    )
 
 
 # =========================================================

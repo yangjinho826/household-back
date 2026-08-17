@@ -36,6 +36,8 @@ from app.domain.category.model import Category
 from app.domain.fixed.model import FixedExpense
 from app.domain.household.enum import HouseholdRole
 from app.domain.household.model import Household, HouseholdMember
+from app.domain.exchange_rate.enum import CurrencyCode
+from app.domain.exchange_rate.repository import CurrencyRateRepository
 from app.domain.market_price import service as market_price_service
 from app.domain.portfolio.enum import Market, PortfolioTxType
 from app.domain.portfolio.model import (
@@ -480,6 +482,22 @@ async def _create_transactions(  # noqa: PLR0913 — 시드 조립부라 인자�
     return count
 
 
+_DEMO_FALLBACK_USD_KRW = Decimal("1400.0000")
+
+
+async def _demo_usd_krw(session: AsyncSession) -> Decimal:
+    """데모용 USD/KRW. 환율 잡이 아직 안 돌았어도 시딩은 끝나야 하므로 fallback 을 둔다."""
+    rate = await CurrencyRateRepository(session).find_by_pair(
+        CurrencyCode.USD, CurrencyCode.KRW,
+    )
+    return rate.rate if rate else _DEMO_FALLBACK_USD_KRW
+
+
+def _ccy(krw: Decimal, fx: Decimal) -> Decimal:
+    """원화 금액 → 거래통화. fx=1 이면 그대로."""
+    return (krw / fx).quantize(Decimal("0.0001"))
+
+
 async def _create_portfolio(  # noqa: PLR0913 — 시드 조립부라 인자가 많다
     session: AsyncSession,
     household_id,
@@ -496,14 +514,24 @@ async def _create_portfolio(  # noqa: PLR0913 — 시드 조립부라 인자가 
     months = _months_between(first_month, today)
     count = 0
 
+    # _HOLDINGS 의 base_price 는 전부 원화다. 해외 종목은 같은 환율로 나눠
+    # 달러 원본을 만든다 — 합성 데이터라 두 값이 서로 정합하기만 하면 된다.
+    fx_usd = await _demo_usd_krw(session)
+
     for name, code, market, base_price, monthly_qty in _HOLDINGS:
         quantity = Decimal("0")
         cost = Decimal("0")
+        cost_ccy = Decimal("0")
+        currency = Market(market).currency
+        fx = fx_usd if currency == "USD" else Decimal("1.0000")
         item = PortfolioItem(
             household_id=household_id, account_id=account_id,
             name=name, code=code, market=market,
             quantity=Decimal("0"), avg_price=Decimal("0"),
-            current_price=Decimal(base_price), is_archived=False,
+            current_price=Decimal(base_price),
+            currency=currency,
+            current_price_ccy=_ccy(Decimal(base_price), fx),
+            is_archived=False,
             data_stat_cd=DataStatus.ACTIVE,
         )
         session.add(item)
@@ -524,6 +552,8 @@ async def _create_portfolio(  # noqa: PLR0913 — 시드 조립부라 인자가 
                     household_id=household_id, account_id=account_id,
                     portfolio_item_id=item.id, name=name, code=code, market=market,
                     pt_type=PortfolioTxType.BUY, quantity=monthly_qty, price=price,
+                    currency=currency, price_ccy=_ccy(price, fx),
+                    fee_ccy=Decimal("0"), fx_rate=fx,
                     tx_date=buy_date, memo="적립식 매수",
                     data_stat_cd=DataStatus.ACTIVE,
                 )
@@ -544,6 +574,8 @@ async def _create_portfolio(  # noqa: PLR0913 — 시드 조립부라 인자가 
                             portfolio_item_id=item.id, name=name, code=code,
                             market=market, pt_type=PortfolioTxType.SELL,
                             quantity=sell_qty, price=sell_price, tx_date=sell_date,
+                            currency=currency, price_ccy=_ccy(sell_price, fx),
+                            fee_ccy=Decimal("0"), fx_rate=fx,
                             memo="일부 차익 실현",
                             realized_pnl=(sell_price * sell_qty - basis).quantize(
                                 Decimal("0.01"),
@@ -558,6 +590,7 @@ async def _create_portfolio(  # noqa: PLR0913 — 시드 조립부라 인자가 
 
         item.quantity = quantity
         item.avg_price = (cost / quantity).quantize(Decimal("0.01")) if quantity else Decimal("0")
+        item.avg_price_ccy = _ccy(item.avg_price, fx) if quantity else None
 
     await session.flush()
     return count

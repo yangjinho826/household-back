@@ -50,6 +50,17 @@ class Market(StrEnum):
         }[self]
 
     @property
+    def currency(self) -> str:
+        """거래통화 — 시장 하나에서 도출한다.
+
+        item 과 transaction 이 각자 통화를 들고 있으면 갈릴 수 있어(종목 market 수정 등),
+        저장 시 항상 이 값으로 강제한다. OTHER(금·채권 등)는 원화 수동 입력이라 KRW.
+        """
+        if self in (Market.NASDAQ, Market.NYSE):
+            return "USD"
+        return "KRW"
+
+    @property
     def country_code(self) -> str:
         """그룹핑/표시용 — KR or US 도출. OTHER 는 정의되지 않음."""
         if self in (Market.KRX_KOSPI, Market.KRX_KOSDAQ):

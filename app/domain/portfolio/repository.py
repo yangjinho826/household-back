@@ -221,14 +221,18 @@ class PortfolioItemRepository:
         ]
 
     async def bulk_update_current_price_by_code_market(
-        self, prices: dict[tuple[str, Market], Decimal],
+        self, prices: dict[tuple[str, Market], tuple[Decimal, Decimal]],
     ) -> int:
-        """매치되는 모든 active row 의 current_price 일괄 update.
-        반환: 총 영향받은 row 수."""
+        """매치되는 모든 active row 의 현재가 일괄 update.
+
+        값은 (KRW 환산가, 거래통화 원본가) 쌍. 원본가를 같이 저장해야 달러 종목
+        화면이 환산 전 시세를 주 표기로 쓸 수 있다.
+        반환: 총 영향받은 row 수.
+        """
         if not prices:
             return 0
         total = 0
-        for (code, market), price in prices.items():
+        for (code, market), (price, price_ccy) in prices.items():
             result = await self.db.execute(
                 update(PortfolioItem)
                 .where(
@@ -238,7 +242,7 @@ class PortfolioItemRepository:
                         PortfolioItem.data_stat_cd == DataStatus.ACTIVE,
                     )
                 )
-                .values(current_price=price)
+                .values(current_price=price, current_price_ccy=price_ccy)
             )
             total += result.rowcount or 0
         return total

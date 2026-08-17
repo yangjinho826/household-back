@@ -23,8 +23,19 @@ class PortfolioItem(BaseEntity):
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     market: Mapped[str] = mapped_column(String(20), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    # KRW 가 진실 원천 — 계좌잔액·순자산·스냅샷 합산이 전부 이 컬럼을 통화 구분 없이 더한다.
     avg_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     current_price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    # 거래통화 병행 보관 — 화면 표시와 종목 자체 수익률(환율 변동 제외)용.
+    # market 에서 도출한다(Market.currency).
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, server_default=text("'KRW'"),
+    )
+    # NULL = 달러 원본을 모르는 상태. 마이그레이션 이전 거래로만 구성된 종목이 그렇다.
+    avg_price_ccy: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+    current_price_ccy: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 4), nullable=True,
+    )
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
@@ -52,12 +63,31 @@ class PortfolioTransaction(BaseEntity):
     fee: Mapped[Decimal] = mapped_column(
         Numeric(15, 2), nullable=False, server_default=text("0"),
     )
+    # 거래통화 원본 + 거래시점 환율. price/fee(KRW)는 이 값에 fx_rate 를 곱해 만든다.
+    # 마이그레이션 이전 거래는 원본 달러가가 저장된 적이 없어 *_ccy 가 NULL 이다
+    # (price 는 이미 원화 환산값이라 되돌릴 수 없다).
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, server_default=text("'KRW'"),
+    )
+    price_ccy: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+    fee_ccy: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+    fx_rate: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4), nullable=False, server_default=text("1"),
+    )
     tx_date: Mapped[date] = mapped_column(Date, nullable=False)
     memo: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 매도 실현손익 — SELL 만 채워짐. 매도시점 이동평균 평단 기준 건별 박제.
     # BUY 또는 R2 이전 SELL 은 NULL (매도시점 평단 복원 불가).
     realized_pnl: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
     realized_cost_basis: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2), nullable=True,
+    )
+    # 거래통화 기준 실현손익 — 환율 변동이 섞이지 않은 종목 자체 성과.
+    # 기여 거래 중 price_ccy 가 없는 게 하나라도 있으면 NULL.
+    realized_pnl_ccy: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2), nullable=True,
+    )
+    realized_cost_basis_ccy: Mapped[Decimal | None] = mapped_column(
         Numeric(15, 2), nullable=True,
     )
 

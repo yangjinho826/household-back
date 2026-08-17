@@ -95,13 +95,64 @@ async def lookup_stock(
     )
 
 
+def _to_krw(amount_ccy: Decimal, fx: Decimal) -> Decimal:
+    """거래통화 금액 → KRW. 저장 시 한 번만 계산하고 이후 재계산하지 않는다.
+
+    replay 마다 다시 곱하면 반올림 오차가 누적돼 과거 실현손익이 흔들린다.
+    """
+    return (amount_ccy * fx).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+async def _try_resolve_fx(db: AsyncSession, currency: str) -> Decimal | None:
+    """환율 조회 — 없으면 None. 표시용 파생값처럼 없어도 되는 곳에서 쓴다."""
+    if currency == "KRW":
+        return Decimal("1.0000")
+    latest = await CurrencyRateRepository(db).find_by_pair(
+        CurrencyCode.USD, CurrencyCode.KRW,
+    )
+    return latest.rate if latest else None
+
+
+async def _resolve_fx(db: AsyncSession, currency: str) -> Decimal:
+    """거래에 박제할 환율. KRW 는 1, USD 는 최신 USD/KRW.
+
+    없으면 거부한다 — 조용히 1 을 쓰면 달러 금액이 원화로 취급돼 순자산이
+    1/1400 로 찌그러진다. 매매는 KRW 금액을 반드시 파생해야 하므로 타협 불가.
+    """
+    fx = await _try_resolve_fx(db, currency)
+    if fx is None:
+        logger.error("환율 없음 — USD 매매 거부 (currency=%s)", currency)
+        raise CustomException(ErrorCode.BAD_REQUEST)
+    return fx
+
+
 async def create_portfolio(
     db: AsyncSession, household: Household, req: PortfolioCreateRequest,
 ) -> PortfolioResponse:
-    """종목 등록 — 메타만 (qty=0, avg_price=0). 매수는 buy() 로"""
+    """종목 등록 — 메타만 (qty=0, avg_price=0). 매수는 buy() 로.
+
+    current_price 는 KRW 로 받는다(`lookup_stock` 이 환산해 폼을 채우므로).
+    달러 종목이면 같은 환율로 나눠 원본 달러 시세를 복원한다 — lookup 이 준 값은
+    '오늘 시세 × 오늘 환율' 이라 나누면 정확히 되돌아온다.
+
+    환율이 없어도 등록은 막지 않는다. 등록은 메타 입력일 뿐이고 달러 시세는
+    시세 갱신이 채울 수 있다. 환율을 강제해야 하는 건 KRW 금액을 파생해야 하는
+    매매뿐이다(`buy`/`sell`).
+    """
     await _validate_investment_account(db, household.id, req.account_id)
 
+    currency = req.market.currency
+    current_price_ccy: Decimal | None = req.current_price
+    if currency != "KRW":
+        fx = await _try_resolve_fx(db, currency)
+        current_price_ccy = (
+            (req.current_price / fx).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            if fx is not None
+            else None
+        )
+
     item = PortfolioItem(
+        currency=currency,
         household_id=household.id,
         account_id=req.account_id,
         name=req.name.strip(),
@@ -110,6 +161,7 @@ async def create_portfolio(
         quantity=Decimal("0.0000"),
         avg_price=Decimal("0.00"),
         current_price=req.current_price,
+        current_price_ccy=current_price_ccy,
         is_archived=False,
         data_stat_cd=DataStatus.ACTIVE,
     )
@@ -134,7 +186,9 @@ async def buy(
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
-    # 1. 매수 이력 기록
+    # 1. 매수 이력 기록 — 입력은 거래통화, KRW 는 환율을 곱해 파생한다.
+    currency = Market(item.market).currency
+    fx = await _resolve_fx(db, currency)
     pt_tx = PortfolioTransaction(
         household_id=household.id,
         account_id=item.account_id,
@@ -144,8 +198,12 @@ async def buy(
         market=item.market,
         pt_type=PortfolioTxType.BUY,
         quantity=req.quantity,
-        price=req.price,
-        fee=req.fee,
+        price=_to_krw(req.price, fx),
+        fee=_to_krw(req.fee, fx),
+        currency=currency,
+        price_ccy=req.price,
+        fee_ccy=req.fee,
+        fx_rate=fx,
         tx_date=req.tx_date or today_kst(),
         memo=req.memo,
         data_stat_cd=DataStatus.ACTIVE,
@@ -210,7 +268,8 @@ async def sell(
         raise CustomException(ErrorCode.BAD_REQUEST)
 
     # 매도 이력 기록 — 실현손익은 아래 replay 가 매도시점 평단으로 박제한다.
-    # 매수/매도 단가 모두 입력값(원화) 그대로 저장 — buy() 와 동일 기준이라 환산 불필요.
+    currency = Market(item.market).currency
+    fx = await _resolve_fx(db, currency)
     pt_tx = PortfolioTransaction(
         household_id=household.id,
         account_id=item.account_id,
@@ -220,8 +279,12 @@ async def sell(
         market=item.market,
         pt_type=PortfolioTxType.SELL,
         quantity=req.quantity,
-        price=req.sell_price,
-        fee=req.fee,
+        price=_to_krw(req.sell_price, fx),
+        fee=_to_krw(req.fee, fx),
+        currency=currency,
+        price_ccy=req.sell_price,
+        fee_ccy=req.fee,
+        fx_rate=fx,
         tx_date=req.tx_date or today_kst(),
         memo=req.memo,
         data_stat_cd=DataStatus.ACTIVE,
@@ -663,6 +726,25 @@ def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse
     profit_loss = valuation - cost
     profit_loss_rate = (profit_loss / cost * Decimal("100")) if cost > 0 else Decimal("0.00")
 
+    # 거래통화 수익률 — 환율 변동이 빠진 종목 자체 성과. 평단·현재가 중 하나라도
+    # 원본을 모르면(과거 데이터) 계산하지 않는다.
+    profit_loss_ccy: Decimal | None = None
+    profit_loss_rate_ccy: Decimal | None = None
+    if item.avg_price_ccy is not None and item.current_price_ccy is not None:
+        cost_ccy = item.quantity * item.avg_price_ccy
+        # KRW 쪽은 Money/Rate 타입이 정규화하지만 ccy 필드는 원시 Decimal 이라
+        # 여기서 자르지 않으면 -0.0832529235101828... 같은 값이 그대로 나간다.
+        profit_loss_ccy = (item.quantity * item.current_price_ccy - cost_ccy).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP,
+        )
+        profit_loss_rate_ccy = (
+            (profit_loss_ccy / cost_ccy * Decimal("100")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP,
+            )
+            if cost_ccy > 0
+            else Decimal("0.00")
+        )
+
     return PortfolioResponse(
         id=item.id,
         account_id=item.account_id,
@@ -677,6 +759,11 @@ def _build_response(item: PortfolioItem, account_map: dict) -> PortfolioResponse
         valuation=valuation,
         profit_loss=profit_loss,
         profit_loss_rate=profit_loss_rate,
+        currency=item.currency,
+        avg_price_ccy=item.avg_price_ccy,
+        current_price_ccy=item.current_price_ccy,
+        profit_loss_ccy=profit_loss_ccy,
+        profit_loss_rate_ccy=profit_loss_rate_ccy,
         is_archived=item.is_archived,
     )
 
@@ -696,6 +783,10 @@ def _build_tx_response(tx: PortfolioTransaction, account_map: dict) -> Portfolio
         total=tx.quantity * tx.price,
         fee=tx.fee,
         settlement_amount=_settlement_amount(tx),
+        currency=tx.currency,
+        price_ccy=tx.price_ccy,
+        fee_ccy=tx.fee_ccy,
+        fx_rate=tx.fx_rate,
         tx_date=tx.tx_date,
         memo=tx.memo,
         realized_pnl=tx.realized_pnl,
@@ -748,10 +839,17 @@ def _recompute_realized_pnl(
     """
     running_qty = Decimal("0")
     running_cost = Decimal("0")
+    # 거래통화 트랙 — 환율 변동이 섞이지 않은 종목 자체 성과. 기여 거래 중 원본
+    # 단가를 모르는 게 하나라도 있으면(마이그레이션 이전 데이터) 통째로 포기한다.
+    # 일부만 계산하면 화면에 그럴듯한 거짓 평단이 뜬다.
+    ccy_known = all(t.price_ccy is not None for t in txs)
+    running_cost_ccy = Decimal("0")
     for t in txs:
         if t.pt_type == PortfolioTxType.BUY:
             running_qty += t.quantity
             running_cost += t.quantity * t.price + t.fee
+            if ccy_known:
+                running_cost_ccy += t.quantity * t.price_ccy + (t.fee_ccy or 0)
         elif t.pt_type == PortfolioTxType.SELL:
             # 그 시점 보유보다 많이 팔 수는 없다. 최종 수량만 검사하면 매도가 매수보다
             # 앞선 순서를 뒤따르는 매수가 가려주고, 그 매도는 running_avg=0 으로
@@ -765,10 +863,26 @@ def _recompute_realized_pnl(
             t.realized_pnl = (
                 (t.price - running_avg) * t.quantity - t.fee
             ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+            if ccy_known:
+                avg_ccy = (
+                    running_cost_ccy / running_qty if running_qty > 0 else Decimal("0")
+                )
+                t.realized_cost_basis_ccy = (avg_ccy * t.quantity).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP,
+                )
+                t.realized_pnl_ccy = (
+                    (t.price_ccy - avg_ccy) * t.quantity - (t.fee_ccy or 0)
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                running_cost_ccy -= avg_ccy * t.quantity
+            else:
+                t.realized_cost_basis_ccy = None
+                t.realized_pnl_ccy = None
+
             # 매도는 평단 불변 — 수량/원가를 평단 비율로 차감 (running_avg 유지)
             running_cost -= running_avg * t.quantity
             running_qty -= t.quantity
-    return running_qty, running_cost
+    return running_qty, running_cost, (running_cost_ccy if ccy_known else None)
 
 
 async def _recalc_item_from_transactions(
@@ -783,7 +897,7 @@ async def _recalc_item_from_transactions(
     pt_repo = PortfolioTransactionRepository(db)
     txs = await pt_repo.find_active_by_item_id(item.id)
 
-    remaining_qty, remaining_cost = _recompute_realized_pnl(txs)
+    remaining_qty, remaining_cost, remaining_cost_ccy = _recompute_realized_pnl(txs)
     if remaining_qty < 0:
         raise CustomException(ErrorCode.BAD_REQUEST)
 
@@ -791,9 +905,25 @@ async def _recalc_item_from_transactions(
     item.avg_price = (
         remaining_cost / remaining_qty if remaining_qty > 0 else Decimal("0.00")
     )
+    # 원본 단가를 모르는 거래가 섞이면 None — 거짓 평단을 만들지 않는다.
+    item.avg_price_ccy = (
+        (remaining_cost_ccy / remaining_qty)
+        if remaining_cost_ccy is not None and remaining_qty > 0
+        else None
+    )
     # 거래 수정/삭제로 수량이 0→양수면 종목 부활, 양수→0이면 소멸(전량매도와 동일).
     item.data_stat_cd = DataStatus.ACTIVE if remaining_qty > 0 else DataStatus.DELETED
     await db.flush()
+
+
+async def recalc_item(
+    db: AsyncSession, household: Household, item_id: UUID,
+) -> None:
+    """종목 재계산 진입점 — 거래를 직접 손댄 뒤 정합을 되돌릴 때 쓴다."""
+    item = await PortfolioItemRepository(db).find_by_id_any_status(item_id)
+    if not item or item.household_id != household.id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+    await _recalc_item_from_transactions(db, item)
 
 
 def _default_month_range(
