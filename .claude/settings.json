@@ -1,5 +1,5 @@
 {
-  "autoMemoryDirectory": "~/.claude/memory/household-back",
+  "autoMemoryDirectory": "~/.claude/memory/moeum-back",
   "hooks": {
     "Stop": [
       {

@@ -1,4 +1,4 @@
-# household-back
+# moeum-back
 
 스택: `python-fastapi`
 
