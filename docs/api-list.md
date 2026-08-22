@@ -1,6 +1,6 @@
-# household-back API 목록
+# moeum-back API 목록
 
-household-front (`src/_features/<도메인>/api.ts`) 가 호출하는 모든 엔드포인트 + 현재 백엔드 구현 상태. 도메인별 모델·스키마·라우터 구현은 도메인 단위 별도 작업으로 진행.
+moeum-front (`src/_features/<도메인>/api.ts`) 가 호출하는 모든 엔드포인트 + 현재 백엔드 구현 상태. 도메인별 모델·스키마·라우터 구현은 도메인 단위 별도 작업으로 진행.
 
 ---
 
@@ -171,10 +171,10 @@ household-front (`src/_features/<도메인>/api.ts`) 가 호출하는 모든 엔
 ## 참고 파일
 
 **프론트 (읽기 전용 — 도메인별 spec 소스)**
-- `household-front/src/_features/{도메인}/api.ts`
-- `household-front/src/_features/{도메인}/types.ts`
-- `household-front/src/_features/{도메인}/mock.ts`
-- `household-front/next.config.mjs` — `/api/*` rewrite
+- `moeum-front/src/_features/{도메인}/api.ts`
+- `moeum-front/src/_features/{도메인}/types.ts`
+- `moeum-front/src/_features/{도메인}/mock.ts`
+- `moeum-front/next.config.mjs` — `/api/*` rewrite
 
 **백엔드 (공통 인프라)**
 - `app/main.py` — `root_path="/api"` + 라우터 등록

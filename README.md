@@ -1,4 +1,4 @@
-# household-back
+# moeum-back
 
 부부 공유 가계부 백엔드. `ai-router-api` 스택 그대로 (FastAPI / SQLAlchemy 2.x async / asyncpg / JWT).
 
